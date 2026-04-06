@@ -2,12 +2,15 @@ import type * as db from "../prisma/generated/client";
 import { getUserFromRequest, notAuthedResponse } from "./auth";
 import { jsonError } from "./api-util";
 
-export function isAdmin(user: db.User): boolean {
-  const adminIds = (import.meta.env.ADMIN_SLACK_IDS || "")
+export function getAdminSlackIds(): string[] {
+  return (import.meta.env.ADMIN_SLACK_IDS || "")
     .split(";")
     .map((s: string) => s.trim())
     .filter(Boolean);
-  return adminIds.includes(user.slackId);
+}
+
+export function isAdmin(user: db.User): boolean {
+  return getAdminSlackIds().includes(user.slackId);
 }
 
 export async function getAdminFromRequest(request: Request): Promise<db.User | null> {

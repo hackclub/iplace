@@ -2,6 +2,8 @@ import type { APIRoute } from "astro";
 import { z } from "zod";
 import { getUserFromRequest, notAuthedResponse } from "../../../lib/auth";
 import { validateRequestBody, jsonError, jsonResponse } from "../../../lib/api-util";
+import { getAdminSlackIds } from "../../../lib/admin";
+import { sendSlackDM } from "../../../lib/slack";
 import prisma from "../../../lib/prisma";
 import { Hackatime } from "../../../hackatime";
 import { BEGIN_DATE } from "../../../config";
@@ -15,6 +17,13 @@ const CreateSubmissionSchema = z.object({
 });
 
 const hackatime = new Hackatime(import.meta.env.HACKATIME_ADMIN_KEY);
+
+async function notifyAdminsOfSubmission(userSlackId: string, iframeUrl: string, isUpdate: boolean) {
+  const adminIds = getAdminSlackIds();
+  const action = isUpdate ? "resubmitted" : "submitted";
+  const message = `📋 <@${userSlackId}> just ${action} a project for review: ${iframeUrl}\nHead to https://iplace.hackclub.com/admin/submissions to review it!`;
+  await Promise.all(adminIds.map(id => sendSlackDM(id, message)));
+}
 
 /** Strips trailing slashes, query params, and hash from a URL for comparison. */
 function normalizeUrl(raw: string): string {
@@ -97,6 +106,8 @@ export const POST: APIRoute = async ({ request }) => {
       return { submission, frame };
     });
 
+    notifyAdminsOfSubmission(user.slackId, iframeUrl, true);
+
     return jsonResponse({
       success: true,
       updated: true,
@@ -141,6 +152,8 @@ export const POST: APIRoute = async ({ request }) => {
 
     return { submission, frame };
   });
+
+  notifyAdminsOfSubmission(user.slackId, iframeUrl, false);
 
   return jsonResponse({
     success: true,
