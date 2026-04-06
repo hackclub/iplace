@@ -276,6 +276,12 @@ if (currentUser) {
       padding: 4em;
     }
 
+    @media (max-width: 600px) {
+      #project-selection-modal .modal-content {
+        padding: 1.5em;
+      }
+    }
+
     .modal-loading {
       text-align: center;
       padding: 2em;
@@ -563,35 +569,53 @@ if (currentUser) {
         }, 500);
       }
 
-      // Get random offset for a tile with a frame
+      // Get random offset for a tile with a frame, preferring tiles in populated areas
       function getRandomTileOffset(): Vector2 {
+        const viewportCenterX = window.innerWidth / 2;
+        const viewportCenterY = window.innerHeight / 2;
+
         // Pick a random tile that has a frame
         const tilesWithFrames = map.tiles.filter(tile => {
           const frame = map.frames.find(f => f.id === tile.frame);
           return frame !== undefined;
         });
-        
+
         if (tilesWithFrames.length > 0) {
-          const randomTile = tilesWithFrames[Math.floor(Math.random() * tilesWithFrames.length)];
+          // Prefer tiles that have neighbors (more visually interesting areas)
+          const tilesWithNeighborCount = tilesWithFrames.map(tile => {
+            let neighbors = 0;
+            for (const other of tilesWithFrames) {
+              const dx = Math.abs(other.x - tile.x);
+              const dy = Math.abs(other.y - tile.y);
+              if (dx <= 3 && dy <= 3 && (dx !== 0 || dy !== 0)) neighbors++;
+            }
+            return { tile, neighbors };
+          });
+
+          // Sort by neighbor count and pick from the top half
+          tilesWithNeighborCount.sort((a, b) => b.neighbors - a.neighbors);
+          const topHalf = tilesWithNeighborCount.slice(0, Math.max(1, Math.ceil(tilesWithNeighborCount.length / 2)));
+          const { tile: randomTile } = topHalf[Math.floor(Math.random() * topHalf.length)];
+
           // Convert tile coordinates to screen-space offset (center the view on this tile)
           const tileScreenX = randomTile.x * TILE_SIZE;
           const tileScreenY = randomTile.y * TILE_SIZE;
-          
+
           // Center the viewport on this tile by offsetting to bring it to center
-          const viewportCenterX = window.innerWidth / 2;
-          const viewportCenterY = window.innerHeight / 2;
-          
           const offset = {
             x: viewportCenterX - tileScreenX,
             y: viewportCenterY - tileScreenY
           };
-          
+
           console.log("Using random tile:", randomTile, "converted to offset:", offset);
           return offset;
         } else {
-          // Fallback if no tiles with frames exist
-          console.log("No tiles with frames found, using origin");
-          return { x: 0, y: 0 };
+          // Fallback: center viewport on the middle of the canvas
+          console.log("No tiles with frames found, centering on canvas");
+          return {
+            x: viewportCenterX - (CANVAS_WIDTH * TILE_SIZE) / 2,
+            y: viewportCenterY - (CANVAS_HEIGHT * TILE_SIZE) / 2
+          };
         }
       }
 

@@ -32,7 +32,10 @@ const { id = "notice-overlay", minimized = false } = Astro.props;
 
     & .notice {
       width: 50%;
+      max-width: 500px;
       height: min-content;
+      max-height: calc(100vh - 4em);
+      overflow-y: auto;
       display: flex;
       flex-direction: column;
       cursor: default;
@@ -67,6 +70,7 @@ const { id = "notice-overlay", minimized = false } = Astro.props;
     &.minimized {
       & .notice {
         width: 25%;
+        min-width: 120px;
         transition: width .25s;
 
         &:hover {
@@ -76,6 +80,25 @@ const { id = "notice-overlay", minimized = false } = Astro.props;
 
         & .content {
           display: none;
+        }
+      }
+    }
+
+    @media (max-width: 600px) {
+      padding: 1em;
+      justify-content: stretch;
+
+      & .notice {
+        width: 100%;
+        max-width: none;
+      }
+
+      &.minimized .notice {
+        width: 100%;
+        min-width: unset;
+
+        &:hover {
+          width: 100%;
         }
       }
     }
