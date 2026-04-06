@@ -92,17 +92,8 @@ const { id = "notice-overlay", minimized = false } = Astro.props;
         max-width: none;
       }
 
-      &.minimized .notice {
-        width: 100%;
-        min-width: unset;
-
-        &:hover {
-          width: 100%;
-        }
-
-        & .content {
-          display: flex;
-        }
+      &.minimized .notice .content {
+        display: none;
       }
     }
   }
