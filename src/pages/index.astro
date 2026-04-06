@@ -1347,14 +1347,8 @@ if (currentUser) {
       async function loadInlineProjects(preselect?: string[], excludeFrameId?: number) {
         if (!inlineProjectCheckboxes) return;
         try {
-          const fetchOpts: RequestInit = {
-            method: "POST",
-            ...(excludeFrameId ? {
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ excludeFrameId }),
-            } : {}),
-          };
-          const response = await fetch("/api/hackatime-projects", fetchOpts);
+          const params = excludeFrameId ? `?excludeFrameId=${excludeFrameId}` : "";
+          const response = await fetch(`/api/hackatime-projects${params}`);
           if (!response.ok) throw new Error("Failed to fetch projects");
           const data: ApiHackatimeProjectsResponse = await response.json();
 

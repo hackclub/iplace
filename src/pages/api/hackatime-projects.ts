@@ -16,22 +16,15 @@ interface ApiHackatimeProject {
     seconds: number;
 }
 
-export const POST: APIRoute = async ({ request }) => {
+export const GET: APIRoute = async ({ request }) => {
     const user = await getUserFromRequest(request);
     if (!user)
         return notAuthedResponse();
 
     // Optional: exclude a specific frame's projects from the "used" filter
     // (used when re-shipping an existing frame)
-    let excludeFrameId: number | null = null;
-    try {
-        const body = await request.clone().json();
-        if (body?.excludeFrameId) {
-            excludeFrameId = parseInt(body.excludeFrameId, 10) || null;
-        }
-    } catch {
-        // No body or invalid JSON is fine - just list all projects
-    }
+    const url = new URL(request.url);
+    const excludeFrameId = parseInt(url.searchParams.get("excludeFrameId") ?? "", 10) || null;
 
     const allProjects = await hackatime.getProjectsFor(user.slackId);
 
