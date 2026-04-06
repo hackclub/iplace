@@ -1,6 +1,13 @@
 ---
 import Button from './Button.astro';
-import { END_DATE } from '../config';
+
+export interface SubmissionData {
+  iframeUrl: string;
+  repoUrl: string;
+  description: string;
+  hackatimeProjectNames: string;
+  wantsPrize: boolean;
+}
 
 export interface Props {
   frameId: number;
@@ -8,32 +15,37 @@ export interface Props {
   url: string;
   availableTiles: number;
   isPending?: boolean;
+  lastSubmission?: SubmissionData | null;
 }
 
-const { frameId, title, url, availableTiles, isPending = false } = Astro.props;
-const isAfterEndDate = new Date() >= new Date(END_DATE);
+const { frameId, title, url, availableTiles, isPending = false, lastSubmission } = Astro.props;
 ---
 
 <div class="frame-item">
-  <div class="frame-info">
-    <strong>{title}</strong><br />
-    <small>{isPending ? 'Pending approval!' : `Available tiles: ${availableTiles}`}</small>
+  <div class="frame-header">
+    <div class="frame-info">
+      <strong>{title}</strong><br />
+      <small>
+        {isPending && 'Pending approval!'}
+        {!isPending && `Available tiles: ${availableTiles}`}
+      </small>
+    </div>
+    {lastSubmission && !isPending && (
+      <button
+        class="btn-reship"
+        data-submission={JSON.stringify({ ...lastSubmission, frameId })}
+      >
+        Re-ship
+      </button>
+    )}
   </div>
-  {availableTiles > 0 && !isAfterEndDate && (
-    <Button 
-      class="btn-place-tile" 
+  {availableTiles > 0 && !isPending && (
+    <Button
+      class="btn-place-tile"
       data-frame-id={frameId.toString()}
       data-original-text={`Place tile (${availableTiles} available)`}
     >
       Place tile ({availableTiles} available)
-    </Button>
-  )}
-  {!isPending && !isAfterEndDate && (
-    <Button 
-      class="btn-update-time" 
-      data-frame-id={frameId.toString()}
-    >
-      Update time
     </Button>
   )}
 </div>
@@ -44,21 +56,43 @@ const isAfterEndDate = new Date() >= new Date(END_DATE);
     padding: 0.8em;
     margin: 0.5em 0;
     background: #fff;
-    
-    .frame-info {
+
+    .frame-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.5em;
       margin-bottom: 0.5em;
-      
+    }
+
+    .frame-info {
+      flex: 1;
+      min-width: 0;
+
       strong {
         color: #000;
+        word-break: break-all;
       }
-      
+
       small {
         color: #000;
       }
     }
 
-    .btn-update-time {
-      margin-top: 0.5em;
+    .btn-reship {
+      flex-shrink: 0;
+      background: #fff;
+      border: 2px solid #000;
+      font-family: inherit;
+      font-size: 1em;
+      padding: 0.3em 0.75em;
+      cursor: pointer;
+      transition: color 0.25s, background 0.25s;
+
+      &:hover {
+        background: #000;
+        color: #fff;
+      }
     }
   }
 </style>

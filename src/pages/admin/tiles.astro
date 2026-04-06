@@ -1,0 +1,99 @@
+---
+import AdminLayout from "../../components/AdminLayout.astro";
+import prisma from "../../lib/prisma";
+
+const tiles = await prisma.tile.findMany({
+  include: { frame: { include: { owner: true } } },
+  orderBy: { placedAt: "desc" },
+});
+---
+
+<AdminLayout title="Tiles" activeTab="tiles">
+  <p style="margin-bottom: 1em; color: #666;">{tiles.length} tiles placed</p>
+
+  {tiles.length === 0 && <p>No tiles placed yet.</p>}
+
+  <table class="tiles-table">
+    <thead>
+      <tr>
+        <th>Position</th>
+        <th>Frame</th>
+        <th>Owner</th>
+        <th>Placed At</th>
+        <th>Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+      {tiles.map(tile => (
+        <tr data-x={tile.x} data-y={tile.y}>
+          <td>({tile.x}, {tile.y})</td>
+          <td><a href={tile.frame.url} target="_blank" rel="noopener">{tile.frame.url}</a></td>
+          <td>{tile.frame.owner.name}</td>
+          <td>{tile.placedAt.toISOString().split("T")[0]}</td>
+          <td><button class="btn-delete" data-x={tile.x} data-y={tile.y}>Delete</button></td>
+        </tr>
+      ))}
+    </tbody>
+  </table>
+</AdminLayout>
+
+<style>
+  .tiles-table {
+    width: 100%;
+    border-collapse: collapse;
+    background: #fff;
+  }
+  .tiles-table th, .tiles-table td {
+    border: 1px solid #ddd;
+    padding: 0.5em 0.75em;
+    text-align: left;
+    font-size: 0.9em;
+  }
+  .tiles-table th {
+    background: #000;
+    color: #fff;
+    border-color: #000;
+  }
+  .tiles-table a { color: #000; }
+  .btn-delete {
+    padding: 0.25em 0.5em;
+    border: 1px solid #dc3545;
+    background: #f8d7da;
+    color: #721c24;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 0.85em;
+  }
+  .btn-delete:hover {
+    background: #dc3545;
+    color: #fff;
+  }
+</style>
+
+<script>
+  document.querySelectorAll<HTMLButtonElement>(".btn-delete").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      const x = parseInt(btn.dataset.x!, 10);
+      const y = parseInt(btn.dataset.y!, 10);
+      if (!confirm(`Delete tile at (${x}, ${y})?`)) return;
+
+      btn.disabled = true;
+      btn.textContent = "Deleting...";
+      try {
+        const res = await fetch("/api/admin/tiles/delete", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ x, y }),
+        });
+        if (!res.ok) {
+          const err = await res.json();
+          alert(`Error: ${err.error}`);
+        } else {
+          btn.closest("tr")?.remove();
+        }
+      } catch (e: any) {
+        alert(`Error: ${e.message}`);
+      }
+    });
+  });
+</script>

@@ -1,0 +1,67 @@
+---
+import AdminLayout from "../../components/AdminLayout.astro";
+import prisma from "../../lib/prisma";
+import { getSlackUsernames } from "../../lib/slack";
+
+const users = await prisma.user.findMany({
+  include: {
+    _count: { select: { ownedFrames: true, submissions: true } },
+  },
+  orderBy: { id: "desc" },
+});
+
+const slackNames = await getSlackUsernames(users.map(u => u.slackId));
+---
+
+<AdminLayout title="Users" activeTab="users">
+  <p style="margin-bottom: 1em; color: #666;">{users.length} users</p>
+
+  <table class="users-table">
+    <thead>
+      <tr>
+        <th>ID</th>
+        <th>Name</th>
+        <th>Email</th>
+        <th>Slack ID</th>
+        <th>Frames</th>
+        <th>Submissions</th>
+        <th>Address</th>
+      </tr>
+    </thead>
+    <tbody>
+      {users.map(user => (
+        <tr>
+          <td>{user.id}</td>
+          <td>
+            {user.profilePicture && <img src={user.profilePicture} alt="" width="20" height="20" style="vertical-align: middle; margin-right: 0.3em; border-radius: 2px;" />}
+            <a href={`https://hackclub.slack.com/team/${user.slackId}`} target="_blank" rel="noopener">{slackNames.get(user.slackId) ?? user.slackId}</a>
+          </td>
+          <td>{user.email || "-"}</td>
+          <td style="font-size: 0.8em;">{user.slackId}</td>
+          <td>{user._count.ownedFrames}</td>
+          <td>{user._count.submissions}</td>
+          <td style="font-size: 0.8em;">{user.city ? `${user.city}, ${user.stateProvince ?? ""}` : "-"}</td>
+        </tr>
+      ))}
+    </tbody>
+  </table>
+</AdminLayout>
+
+<style>
+  .users-table {
+    width: 100%;
+    border-collapse: collapse;
+    background: #fff;
+  }
+  .users-table th, .users-table td {
+    border: 1px solid #ddd;
+    padding: 0.5em 0.75em;
+    text-align: left;
+    font-size: 0.9em;
+  }
+  .users-table th {
+    background: #000;
+    color: #fff;
+    border-color: #000;
+  }
+</style>

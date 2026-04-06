@@ -1,0 +1,70 @@
+---
+import AdminLayout from "../../components/AdminLayout.astro";
+import prisma from "../../lib/prisma";
+
+const [pendingCount, approvedCount, rejectedCount, userCount, tileCount] = await Promise.all([
+  prisma.submission.count({ where: { status: "PENDING" } }),
+  prisma.submission.count({ where: { status: "APPROVED" } }),
+  prisma.submission.count({ where: { status: "REJECTED" } }),
+  prisma.user.count(),
+  prisma.tile.count(),
+]);
+---
+
+<AdminLayout title="Dashboard" activeTab="dashboard">
+  <div class="stats-grid">
+    <div class="stat-card highlight">
+      <div class="stat-value">{pendingCount}</div>
+      <div class="stat-label">Pending Submissions</div>
+      <a href="/admin/submissions?status=PENDING">Review &rarr;</a>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value">{approvedCount}</div>
+      <div class="stat-label">Approved</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value">{rejectedCount}</div>
+      <div class="stat-label">Rejected</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value">{userCount}</div>
+      <div class="stat-label">Users</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value">{tileCount}</div>
+      <div class="stat-label">Tiles Placed</div>
+    </div>
+  </div>
+</AdminLayout>
+
+<style>
+  .stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 1em;
+  }
+  .stat-card {
+    background: #fff;
+    border: 2px solid #000;
+    padding: 1.5em;
+  }
+  .stat-card.highlight {
+    border-width: 3px;
+  }
+  .stat-value {
+    font-size: 2em;
+    font-weight: 700;
+  }
+  .stat-label {
+    color: #666;
+    font-size: 0.85em;
+    margin-top: 0.25em;
+  }
+  .stat-card a {
+    display: inline-block;
+    margin-top: 0.75em;
+    color: #000;
+    font-weight: 600;
+    font-size: 0.85em;
+  }
+</style>

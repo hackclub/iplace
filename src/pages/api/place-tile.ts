@@ -3,6 +3,7 @@ import { z } from "zod";
 import { getUserFromRequest, notAuthedResponse } from "../../lib/auth";
 import { jsonError, jsonResponse, validateRequestBody } from "../../lib/api-util";
 import prisma from "../../lib/prisma";
+import { SECONDS_PER_TILE } from "../../config";
 
 const PlaceTileSchema = z.object({
     x: z.number().int("x must be an integer"),
@@ -34,7 +35,7 @@ export const POST: APIRoute = async ({ request }) => {
     if (frame.ownerId !== user.id)
         return jsonError(403, "You can only place tiles on your own frames");
 
-    const requiredTime = (frame.placedTiles + 1) * 3600;
+    const requiredTime = (frame.placedTiles + 1) * SECONDS_PER_TILE;
     if (!frame.approvedTime || frame.approvedTime - requiredTime < 0)
         return jsonError(400, "Insufficient approved time to place another tile");
 
@@ -94,7 +95,7 @@ export const POST: APIRoute = async ({ request }) => {
         },
         frame: {
             placedTiles: updatedFrame.placedTiles,
-            remainingTime: (updatedFrame.approvedTime || 0) - (updatedFrame.placedTiles * 3600)
+            remainingTime: (updatedFrame.approvedTime || 0) - (updatedFrame.placedTiles * SECONDS_PER_TILE)
         }
     });
 };

@@ -1,34 +1,6 @@
-import jwt from "jsonwebtoken";
 import prisma from "./prisma";
 import type * as db from "../prisma/generated/client";
 import { jsonError } from "./api-util";
-
-const JWT_SECRET = import.meta.env.JWT_SECRET;
-
-export interface VerificationTokenPayload {
-  slackId: string;
-  iat: number;
-  exp: number;
-}
-
-/**
- * Creates a token that verifies that a frame creation request was created by the given user.
- */
-export function createAuthorshipToken(slackId: string): string {
-  return jwt.sign({ slackId }, JWT_SECRET, { expiresIn: "12h" });
-}
-
-/**
- * Verifies that an authorship token is valid.
- */
-export function verifyAuthorshipToken(token: string): VerificationTokenPayload | null {
-  try {
-    return jwt.verify(token, JWT_SECRET) as VerificationTokenPayload;
-  }
-  catch (error) {
-    return null;
-  }
-}
 
 export async function createSession(userId: number): Promise<string> {
   const expiresAt = new Date();
@@ -91,11 +63,4 @@ export async function getUserFromRequest(request: Request): Promise<db.User | nu
     console.warn("(warn) An error occured while verifying a user session!", error);
     return null;
   }
-}
-
-export function validateInternalSecret(secret: string | undefined): boolean {
-  if (!secret || secret !== import.meta.env.INTERNAL_SECRET_TOKEN)
-    return false;
-
-  return true;
 }

@@ -21,16 +21,28 @@ export const POST: APIRoute = async ({ request }) => {
     if (!user)
         return notAuthedResponse();
 
+    // Optional: exclude a specific frame's projects from the "used" filter
+    // (used when re-shipping an existing frame)
+    let excludeFrameId: number | null = null;
+    try {
+        const body = await request.clone().json();
+        if (body?.excludeFrameId) {
+            excludeFrameId = parseInt(body.excludeFrameId, 10) || null;
+        }
+    } catch {
+        // No body or invalid JSON is fine - just list all projects
+    }
+
     const allProjects = await hackatime.getProjectsFor(user.slackId);
-    
+
     const userFrames = await prisma.frame.findMany({
         where: { ownerId: user.id },
-        select: { projectNames: true }
+        select: { id: true, projectNames: true }
     });
-    
+
     const usedProjectNames = new Set<string>(
         userFrames
-            .filter(x => x.projectNames)
+            .filter(x => x.projectNames && x.id !== excludeFrameId)
             .map(x => x.projectNames.split(","))
             .flat()
     );
