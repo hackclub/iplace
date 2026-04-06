@@ -1,0 +1,323 @@
+---
+import AdminLayout from "../../components/AdminLayout.astro";
+import prisma from "../../lib/prisma";
+import { Hackatime } from "../../hackatime";
+import { SECONDS_PER_TILE } from "../../config";
+import { getSlackUsernames } from "../../lib/slack";
+import type { SubmissionStatus } from "../../prisma/generated/client";
+
+const statusFilter = (Astro.url.searchParams.get("status") as SubmissionStatus | null) || undefined;
+
+const submissions = await prisma.submission.findMany({
+  where: statusFilter ? { status: statusFilter } : undefined,
+  include: { owner: true, frame: true },
+  orderBy: { createdAt: "desc" },
+});
+
+// Fetch Hackatime times for pending submissions
+const hackatime = new Hackatime(import.meta.env.HACKATIME_ADMIN_KEY);
+const hackatimeTimes = new Map<number, number>(); // submission id -> total seconds
+
+for (const sub of submissions) {
+  if (sub.status !== "PENDING") continue;
+  try {
+    const projects = await hackatime.getProjectsFor(sub.owner.slackId);
+    const projectNames = sub.hackatimeProjectNames.split(",").map(n => n.trim());
+    let total = 0;
+    for (const name of projectNames) {
+      const p = projects.find(x => x.name === name);
+      if (p) total += p.total_seconds;
+    }
+    hackatimeTimes.set(sub.id, total);
+  } catch {
+    // Skip if Hackatime fetch fails
+  }
+}
+
+// Fetch Slack display names
+const slackNames = await getSlackUsernames(submissions.map(s => s.owner.slackId));
+
+function formatDate(date: Date) {
+  return date.toISOString().split("T")[0];
+}
+
+function formatTime(seconds: number): string {
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  if (hours > 0) return `${hours}h ${minutes}m`;
+  return `${minutes}m`;
+}
+---
+
+<AdminLayout title="Submissions" activeTab="submissions">
+  <div class="filters">
+    <a href="/admin/submissions" class:list={{ active: !statusFilter }}>All</a>
+    <a href="/admin/submissions?status=PENDING" class:list={{ active: statusFilter === "PENDING" }}>Pending</a>
+    <a href="/admin/submissions?status=APPROVED" class:list={{ active: statusFilter === "APPROVED" }}>Approved</a>
+    <a href="/admin/submissions?status=REJECTED" class:list={{ active: statusFilter === "REJECTED" }}>Rejected</a>
+  </div>
+
+  {submissions.length === 0 && <p class="empty">No submissions found.</p>}
+
+  {submissions.map(sub => (
+    <div class="submission-card" data-id={sub.id}>
+      <div class="submission-header">
+        <span class:list={["status-badge", `status-${sub.status.toLowerCase()}`]}>{sub.status}</span>
+        <a href={`https://hackclub.slack.com/team/${sub.owner.slackId}`} target="_blank" rel="noopener" class="owner">{slackNames.get(sub.owner.slackId) ?? sub.owner.slackId}</a>
+        <a href={`https://joe.fraud.hackclub.com/profile/${sub.owner.slackId}`} target="_blank" rel="noopener" class="joe-link">[Joe]</a>
+        <span class="date">{formatDate(sub.createdAt)}</span>
+        {sub.wantsPrize && <span class="prize-badge">Wants Prize</span>}
+      </div>
+      <div class="submission-body">
+        <div class="field">
+          <strong>iframe URL:</strong> <a href={sub.iframeUrl} target="_blank" rel="noopener">{sub.iframeUrl}</a>
+        </div>
+        <div class="field">
+          <strong>Repo:</strong> <a href={sub.repoUrl} target="_blank" rel="noopener">{sub.repoUrl}</a>
+        </div>
+        <div class="field">
+          <strong>Description:</strong>
+          <p class="description">{sub.description}</p>
+        </div>
+        <div class="field">
+          <strong>Hackatime Projects:</strong> {sub.hackatimeProjectNames}
+          {hackatimeTimes.has(sub.id) && (
+            <span class="hackatime-time">({formatTime(hackatimeTimes.get(sub.id)!)} total = {Math.floor(hackatimeTimes.get(sub.id)! / SECONDS_PER_TILE)} tiles)</span>
+          )}
+        </div>
+        {sub.reviewerFeedback && (
+          <div class="field feedback">
+            <strong>Reviewer Feedback:</strong> {sub.reviewerFeedback}
+          </div>
+        )}
+      </div>
+
+      {sub.status === "PENDING" && (
+        <div class="submission-actions">
+          <form class="approve-form" data-id={sub.id}>
+            <div class="approve-row">
+              <label class="checkbox-label">
+                <input type="checkbox" name="syncWithAirtable" />
+                Sync with Airtable
+              </label>
+              <label class="override-label">
+                Override mins:
+                <input type="number" name="overrideMinutes" min="0" step="1" value={hackatimeTimes.has(sub.id) ? Math.round(hackatimeTimes.get(sub.id)! / 60).toString() : ""} class="override-input" />
+              </label>
+              <button type="submit" class="btn btn-approve">Approve</button>
+            </div>
+          </form>
+          <form class="reject-form" data-id={sub.id}>
+            <textarea name="feedback" placeholder="Feedback for the user..." required rows="2"></textarea>
+            <button type="submit" class="btn btn-reject">Reject</button>
+          </form>
+        </div>
+      )}
+    </div>
+  ))}
+</AdminLayout>
+
+<style>
+  .filters {
+    display: flex;
+    gap: 0.5em;
+    margin-bottom: 1.5em;
+  }
+  .filters a {
+    padding: 0.4em 0.8em;
+    border: 2px solid #000;
+    text-decoration: none;
+    color: #000;
+    background: #fff;
+    transition: background 0.2s, color 0.2s;
+  }
+  .filters a:hover, .filters a.active {
+    background: #000;
+    color: #fff;
+  }
+  .empty { color: #666; }
+  .submission-card {
+    background: #fff;
+    border: 2px solid #000;
+    margin-bottom: 1em;
+    padding: 1em;
+  }
+  .submission-header {
+    display: flex;
+    align-items: center;
+    gap: 0.75em;
+    margin-bottom: 0.75em;
+    flex-wrap: wrap;
+  }
+  .status-badge {
+    padding: 0.15em 0.5em;
+    font-size: 0.8em;
+    font-weight: 600;
+    border: 1px solid;
+  }
+  .status-pending { background: #fff3cd; border-color: #ffc107; color: #856404; }
+  .status-approved { background: #d4edda; border-color: #28a745; color: #155724; }
+  .status-rejected { background: #f8d7da; border-color: #dc3545; color: #721c24; }
+  .prize-badge {
+    background: #e0cffc;
+    border: 1px solid #7c3aed;
+    color: #5b21b6;
+    padding: 0.15em 0.5em;
+    font-size: 0.8em;
+    font-weight: 600;
+  }
+  .owner { font-weight: 600; }
+  .joe-link {
+    font-size: 0.8em;
+    color: #666;
+    text-decoration: none;
+    &:hover { color: #000; }
+  }
+  .hackatime-time {
+    color: #666;
+    font-size: 0.9em;
+    margin-left: 0.25em;
+  }
+  .date { color: #666; font-size: 0.85em; }
+  .field { margin-bottom: 0.5em; }
+  .field a { color: #000; }
+  .description {
+    margin-top: 0.25em;
+    white-space: pre-wrap;
+    max-height: 150px;
+    overflow-y: auto;
+    background: #f9f9f9;
+    padding: 0.5em;
+    border: 1px solid #ddd;
+  }
+  .feedback {
+    background: #fff3cd;
+    padding: 0.5em;
+    border: 1px solid #ffc107;
+  }
+  .submission-actions {
+    display: flex;
+    gap: 1em;
+    margin-top: 1em;
+    padding-top: 1em;
+    border-top: 1px solid #ddd;
+    flex-wrap: wrap;
+  }
+  .approve-form, .reject-form {
+    display: flex;
+    align-items: center;
+    gap: 0.5em;
+    flex-wrap: wrap;
+  }
+  .approve-row {
+    display: flex;
+    align-items: center;
+    gap: 0.75em;
+    flex-wrap: wrap;
+  }
+  .override-label {
+    font-size: 0.9em;
+    display: flex;
+    align-items: center;
+    gap: 0.3em;
+  }
+  .override-input {
+    width: 5em;
+    padding: 0.3em;
+    border: 2px solid #000;
+    font-family: inherit;
+    font-size: 0.9em;
+  }
+  .reject-form textarea {
+    font-family: inherit;
+    padding: 0.4em;
+    border: 2px solid #000;
+    resize: vertical;
+    min-width: 250px;
+  }
+  .checkbox-label {
+    display: flex;
+    align-items: center;
+    gap: 0.3em;
+    cursor: pointer;
+    font-size: 0.9em;
+  }
+  .btn {
+    padding: 0.4em 1em;
+    border: 2px solid #000;
+    font-family: inherit;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.2s, color 0.2s;
+  }
+  .btn:hover { background: #000; color: #fff; }
+  .btn-approve { background: #d4edda; }
+  .btn-reject { background: #f8d7da; }
+  .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+</style>
+
+<script>
+  document.querySelectorAll<HTMLFormElement>(".approve-form").forEach(form => {
+    form.addEventListener("submit", async (ev) => {
+      ev.preventDefault();
+      const id = form.dataset.id;
+      const syncWithAirtable = form.querySelector<HTMLInputElement>('input[name="syncWithAirtable"]')?.checked ?? false;
+      const overrideMinutesInput = form.querySelector<HTMLInputElement>('input[name="overrideMinutes"]');
+      const overrideMinutes = overrideMinutesInput?.value ? parseFloat(overrideMinutesInput.value) : undefined;
+      const overrideSeconds = overrideMinutes !== undefined ? Math.round(overrideMinutes * 60) : undefined;
+      const btn = form.querySelector("button")!;
+      btn.disabled = true;
+      btn.textContent = "Approving...";
+
+      try {
+        const res = await fetch(`/api/admin/submissions/${id}/approve`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ syncWithAirtable, ...(overrideSeconds !== undefined && { overrideSeconds }) }),
+        });
+        if (!res.ok) {
+          const err = await res.json();
+          alert(`Error: ${err.error}`);
+        } else {
+          window.location.reload();
+        }
+      } catch (e: any) {
+        alert(`Error: ${e.message}`);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = "Approve";
+      }
+    });
+  });
+
+  document.querySelectorAll<HTMLFormElement>(".reject-form").forEach(form => {
+    form.addEventListener("submit", async (ev) => {
+      ev.preventDefault();
+      const id = form.dataset.id;
+      const feedback = form.querySelector<HTMLTextAreaElement>('textarea[name="feedback"]')?.value ?? "";
+      if (!feedback.trim()) return;
+      const btn = form.querySelector("button")!;
+      btn.disabled = true;
+      btn.textContent = "Rejecting...";
+
+      try {
+        const res = await fetch(`/api/admin/submissions/${id}/reject`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ feedback }),
+        });
+        if (!res.ok) {
+          const err = await res.json();
+          alert(`Error: ${err.error}`);
+        } else {
+          window.location.reload();
+        }
+      } catch (e: any) {
+        alert(`Error: ${e.message}`);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = "Reject";
+      }
+    });
+  });
+</script>

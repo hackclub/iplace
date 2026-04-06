@@ -21,11 +21,54 @@ model User {
   /// The Slack user ID for this user.
   slackId           String        @unique
 
+  /// The Hack Club Auth identity ID.
+  hcaId             String?       @unique
+
   /// The identity vault ID of the user.
   idvId             String?
 
+  /// Email address from HCA.
+  email             String?
+
+  /// First name from HCA profile.
+  firstName         String?
+
+  /// Last name from HCA profile.
+  lastName          String?
+
+  /// Legal first name from HCA.
+  legalFirstName    String?
+
+  /// Legal last name from HCA.
+  legalLastName     String?
+
+  /// Birthday from HCA.
+  birthday          DateTime?
+
+  /// Address line 1 from HCA.
+  addressLine1      String?
+
+  /// Address line 2 from HCA.
+  addressLine2      String?
+
+  /// City from HCA.
+  city              String?
+
+  /// State or province from HCA.
+  stateProvince     String?
+
+  /// Country from HCA.
+  country           String?
+
+  /// ZIP or postal code from HCA.
+  zipPostalCode     String?
+
+  /// YSWS verification status from HCA (e.g. "verified_eligible", "verified_but_over_18").
+  verificationStatus String?
+
   ownedFrames       Frame[]
   sessions          Session[]
+  submissions       Submission[]
 
   @@index([slackId])
 }
@@ -75,8 +118,12 @@ model Frame {
   /// The time when this frame was created.
   createdAt         DateTime      @default(now())
 
-  /// The Airtable ID associated with the frame, which points to a record inside the YSWS base.
-  airtableId        String
+  /// The Airtable ID associated with the frame (optional, set when synced).
+  airtableId        String?
+
+  /// The submission this frame was created from.
+  submissionId      Int?          @unique
+  submission        Submission?   @relation(fields: [submissionId], references: [id])
 
   tiles     Tile[]
 }
@@ -92,4 +139,61 @@ model Tile {
 
   frameId     Int
   frame       Frame     @relation(fields: [frameId], references: [id])
+}
+
+/// Represents a project submission for review.
+model Submission {
+  id                    Int               @id @default(autoincrement())
+
+  /// The iframe-able URL for the project.
+  iframeUrl             String
+
+  /// The repository URL for the project.
+  repoUrl               String
+
+  /// Project description.
+  description           String
+
+  /// Comma-delimited list of Hackatime project names.
+  hackatimeProjectNames String
+
+  /// Whether the user wants the $5/hr hosting credit prize.
+  wantsPrize            Boolean           @default(false)
+
+  /// Review status of this submission.
+  status                SubmissionStatus  @default(PENDING)
+
+  /// Feedback from the reviewer (used on rejection).
+  reviewerFeedback      String?
+
+  /// When this submission was reviewed.
+  reviewedAt            DateTime?
+
+  /// Slack ID of the reviewer.
+  reviewedBy            String?
+
+  /// Whether this submission has been synced to Airtable.
+  airtableSynced        Boolean           @default(false)
+
+  /// The Airtable record ID if synced.
+  airtableRecordId      String?
+
+  /// The user who created this submission.
+  ownerId               Int
+  owner                 User              @relation(fields: [ownerId], references: [id])
+
+  /// The frame created from this submission.
+  frame                 Frame?
+
+  createdAt             DateTime          @default(now())
+  updatedAt             DateTime          @updatedAt
+
+  @@index([ownerId])
+  @@index([status])
+}
+
+enum SubmissionStatus {
+  PENDING
+  APPROVED
+  REJECTED
 }

@@ -1,5 +1,5 @@
 ---
-import { TILE_SIZE, CANVAS_WIDTH, CANVAS_HEIGHT, FRAME_CREATE_FORM_URL, BEGIN_DATE } from "../config";
+import { TILE_SIZE, CANVAS_WIDTH, CANVAS_HEIGHT, SECONDS_PER_TILE } from "../config";
 import { getCurrentUser } from "../lib/server-auth";
 
 import prisma from "../lib/prisma";
@@ -12,12 +12,72 @@ import Details from "../components/Details.astro";
 import Modal from "../components/Modal.astro";
 
 const currentUser = await getCurrentUser(Astro);
-const eventHasStarted = new Date() >= new Date(BEGIN_DATE);
-let userFrames: db.Frame[] = [];
+const isYswsEligible = currentUser?.verificationStatus === "verified";
+
+function normalizeUrl(raw: string): string {
+  try {
+    const url = new URL(raw);
+    return `${url.protocol}//${url.host}${url.pathname}`.replace(/\/+$/, "");
+  } catch {
+    return raw.replace(/[?#].*$/, "").replace(/\/+$/, "");
+  }
+}
+
+interface MergedFrame {
+  frameIds: number[];
+  url: string;
+  availableTiles: number;
+  isPending: boolean;
+  lastSubmission: {
+    iframeUrl: string;
+    repoUrl: string;
+    description: string;
+    hackatimeProjectNames: string;
+    wantsPrize: boolean;
+  } | null;
+}
+
+let mergedFrames: MergedFrame[] = [];
 if (currentUser) {
-  userFrames = await prisma.frame.findMany({
-    where: { ownerId: currentUser.id }
-  })
+  const rawFrames = await prisma.frame.findMany({
+    where: { ownerId: currentUser.id },
+    include: { submission: true },
+    orderBy: { createdAt: "desc" },
+  });
+
+  const byUrl = new Map<string, typeof rawFrames>();
+  for (const frame of rawFrames) {
+    const key = normalizeUrl(frame.url);
+    const group = byUrl.get(key) ?? [];
+    group.push(frame);
+    byUrl.set(key, group);
+  }
+
+  for (const [, frames] of byUrl) {
+    const hasPending = frames.some(f => f.isPending);
+    const totalAvailable = frames.reduce((sum, f) => {
+      if (f.isPending) return sum;
+      return sum + Math.max(0, Math.floor((f.approvedTime || 0) / SECONDS_PER_TILE) - f.placedTiles);
+    }, 0);
+
+    // Use the most recent submission for re-ship data
+    const latestWithSubmission = frames.find(f => f.submission);
+    const sub = latestWithSubmission?.submission;
+
+    mergedFrames.push({
+      frameIds: frames.map(f => f.id),
+      url: frames[0].url,
+      availableTiles: totalAvailable,
+      isPending: hasPending,
+      lastSubmission: sub ? {
+        iframeUrl: sub.iframeUrl,
+        repoUrl: sub.repoUrl,
+        description: sub.description,
+        hackatimeProjectNames: sub.hackatimeProjectNames,
+        wantsPrize: sub.wantsPrize,
+      } : null,
+    });
+  }
 }
 ---
 
@@ -27,17 +87,16 @@ if (currentUser) {
 		<link rel="icon" type="image/svg+xml" href="/favicon.svg" />
 		<meta name="viewport" content="width=device-width" />
 		<meta name="generator" content={Astro.generator} />
-    <link rel="preload" href={FRAME_CREATE_FORM_URL} as="document" />
 		
 		<title>&lt;iplace&gt; | Hack Club</title>
-		<meta name="description" content="Public canvas of websites in iframes. Code for an hour, place a 100x100px tile, get $5 hosting credit. By Hack Club." />
+		<meta name="description" content="Public canvas of websites in iframes. Code for 10 minutes, place a 100x100px tile, get $5 hosting credit. By Hack Club." />
 		<meta name="keywords" content="hack club, iplace, public canvas, iframe, coding, teenagers, hosting credit, web development, programming" />
 		<meta name="author" content="Hack Club" />
 		<meta name="robots" content="index, follow" />
 		<link rel="canonical" href="https://iplace.hackclub.com" />
 		
 		<meta property="og:title" content="&lt;iplace&gt;" />
-		<meta property="og:description" content="Public canvas of websites in iframes. Code for an hour, place a 100x100px tile, get $5 hosting credit. By Hack Club." />
+		<meta property="og:description" content="Public canvas of websites in iframes. Code for 10 minutes, place a 100x100px tile, get $5 hosting credit. By Hack Club." />
 		<meta property="og:type" content="website" />
 		<meta property="og:url" content="https://iplace.hackclub.com" />
 		<meta property="og:site_name" content="Hack Club" />
@@ -49,7 +108,7 @@ if (currentUser) {
 		
 		<meta name="twitter:card" content="summary_large_image" />
 		<meta name="twitter:title" content="&lt;iplace&gt;" />
-		<meta name="twitter:description" content="Public canvas of websites in iframes. Code for an hour, place a 100x100px tile, get $5 hosting credit. By Hack Club." />
+		<meta name="twitter:description" content="Public canvas of websites in iframes. Code for 10 minutes, place a 100x100px tile, get $5 hosting credit. By Hack Club." />
 		<meta name="twitter:site" content="@hackclub" />
 		<meta name="twitter:creator" content="@hackclub" />
 		<!-- <meta name="twitter:image" content="https://iplace.hackclub.com/og-image.png" /> -->
@@ -63,7 +122,6 @@ if (currentUser) {
 		
 		<link rel="preconnect" href="https://fonts.googleapis.com" />
 		<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-		<link rel="preconnect" href="https://forms.hackclub.com" />
 		<link rel="dns-prefetch" href="https://hackclub.com" />
 		
 		<script type="application/ld+json">
@@ -72,7 +130,7 @@ if (currentUser) {
 			"@type": "WebApplication",
 			"name": "iplace",
 			"alternateName": "&lt;iplace&gt;",
-			"description": "Public canvas of websites in iframes. Code for an hour, place a 100x100px tile, get $5 hosting credit. By Hack Club.",
+			"description": "Public canvas of websites in iframes. Code for 10 minutes, place a 100x100px tile, get $5 hosting credit. By Hack Club.",
 			"url": "https://iplace.hackclub.com",
 			"applicationCategory": "DeveloperApplication",
 			"operatingSystem": "All",
@@ -99,9 +157,16 @@ if (currentUser) {
 				"@type": "Offer",
 				"price": "0",
 				"priceCurrency": "USD",
-				"description": "$5 hosting credit per hour of coding"
+				"description": "$5 hosting credit per 10 minutes of coding"
 			}
 		}
+		</script>
+
+		<!-- Privacy-friendly analytics by Plausible -->
+		<script async src="https://plausible.io/js/pa-Yo58gcrCbtX52uqHY_qlX.js"></script>
+		<script>
+			window.plausible=window.plausible||function(){(plausible.q=plausible.q||[]).push(arguments)},plausible.init=plausible.init||function(i){plausible.o=i||{}};
+			plausible.init()
 		</script>
 	</head>
 
@@ -136,10 +201,14 @@ if (currentUser) {
 
     main {
       background: #fff;
+      background-image:
+        linear-gradient(to right, #f5f5f5 1px, transparent 1px),
+        linear-gradient(to bottom, #f5f5f5 1px, transparent 1px);
+      background-size: 100px 100px;
     }
 
     main.place-mode {
-      background-image: 
+      background-image:
         linear-gradient(to right, #ddd 1px, transparent 1px),
         linear-gradient(to bottom, #ddd 1px, transparent 1px);
       background-size: 100px 100px;
@@ -173,6 +242,7 @@ if (currentUser) {
 
     main iframe {
       position: absolute;
+      background: #fff;
     }
 
     iframe {
@@ -295,6 +365,32 @@ if (currentUser) {
       }
     }
 
+    .prize-checkbox-label {
+      display: flex;
+      align-items: flex-start;
+      gap: 0.75em;
+      cursor: pointer;
+    }
+
+    .prize-checkbox {
+      appearance: none;
+      width: 18px;
+      height: 18px;
+      border: 2px solid #000;
+      background: #fff;
+      margin: 0;
+      cursor: pointer;
+      flex-shrink: 0;
+
+      &:checked {
+        background: #000;
+      }
+
+      &:focus {
+        outline: none;
+      }
+    }
+
     .modal-hidden {
       display: none;
     }
@@ -317,78 +413,99 @@ if (currentUser) {
       <span slot="title">Hack Club's <b>&lt;iplace&gt;</b></span>
       
       <p>
-        This is a public canvas of websites inside <b>&lt;iframe&gt;</b> elements. Each hour of coding
+        This is a public canvas of websites inside <b>&lt;iframe&gt;</b> elements. Every 10 minutes of coding
         allows you to place one 100x100px tile and gives you <b>$5</b> in hosting credit!
       </p>
 
       <p>
-        Hold <b>Shift</b> and drag to explore the canvas.<br>
-        <span id="countdown-timer" aria-live="polite"></span>
+        Drag to explore the canvas.
       </p>
 
       <div class="buttons">
         { currentUser ? (
           <Details summary="Your frames">
             <div class="content">
-              { userFrames.length == 0 && <p class="no-frames-message">You have no frames yet!</p> }
-              
-              { userFrames.map(frame => {
-                const availableTiles = frame.isPending ? 0 : Math.max(0, Math.floor((frame.approvedTime || 0) / 3600) - frame.placedTiles);
-                return (
-                  <FrameItem 
-                    frameId={frame.id}
-                    title={frame.url}
-                    url={frame.url}
-                    availableTiles={availableTiles}
-                    isPending={frame.isPending}
-                  />
-                )
-              }) }
-              
+              { mergedFrames.length == 0 && <p class="no-frames-message">You have no frames yet!</p> }
+
+              { mergedFrames.map(mf => (
+                <FrameItem
+                  frameId={mf.frameIds[0]}
+                  title={mf.url}
+                  url={mf.url}
+                  availableTiles={mf.availableTiles}
+                  isPending={mf.isPending}
+                  lastSubmission={mf.lastSubmission}
+                />
+              )) }
+
               <Button id="btn-create-frame">Create a frame</Button>
             </div>
           </Details>
-        ) : eventHasStarted ? (
-          <Button id="btn-login">Log in with Hack Club's Slack</Button>
-        ) : null }
+        ) : (
+          <Button id="btn-login">Log in with Hack Club</Button>
+        ) }
 
         <Button id="btn-random">Take me somewhere random</Button>
       </div>
     </NoticeOverlay>
 
     { currentUser && (
-      <Modal id="create-frame-modal" title="Create frame" closeButtonId="modal-close" hidden>
-        <iframe id="create-frame-iframe" sandbox="allow-same-origin allow-scripts allow-forms" width="100%" height="100%"></iframe>
+      <Modal id="create-frame-modal" title="Submit a project" closeButtonId="modal-close" hidden>
+        <form id="submission-form" style="padding: 2em; display: flex; flex-direction: column; gap: 1em; overflow-y: auto; max-height: 70vh;">
+          <div style="background: #f9f9f9; border: 2px solid #ddd; padding: 1em;">
+            <p style="margin: 0 0 0.5em 0;">
+              iplace uses <a href="https://hackatime.hackclub.com" target="_blank" rel="noopener" style="color: #000;">Hackatime</a> to verify that you actually put effort into your project. Hackatime is a coding time tracker (based on <a href="https://wakatime.com" target="_blank" rel="noopener" style="color: #000;">WakaTime</a>) that runs in your editor and logs how long you've been coding.
+            </p>
+            <p style="margin: 0;">
+              If you haven't set it up yet, head to <a href="https://hackatime.hackclub.com" target="_blank" rel="noopener" style="color: #000;">hackatime.hackclub.com</a> and install the extension for your editor. Once you've coded on your project, your Hackatime projects will show up below!
+            </p>
+          </div>
+          <div>
+            <label for="iframe-url" style="display: block; font-weight: 600; margin-bottom: 0.25em;">&lt;iframe&gt;-able URL</label>
+            <input type="url" id="iframe-url" name="iframeUrl" required placeholder="https://your-project.example.com" style="width: 100%; padding: 0.5em; border: 2px solid #000; font-family: inherit;" />
+          </div>
+          <div>
+            <label for="repo-url" style="display: block; font-weight: 600; margin-bottom: 0.25em;">Repo URL</label>
+            <input type="url" id="repo-url" name="repoUrl" required placeholder="https://github.com/you/your-project" style="width: 100%; padding: 0.5em; border: 2px solid #000; font-family: inherit;" />
+          </div>
+          <div>
+            <label for="description" style="display: block; font-weight: 600; margin-bottom: 0.25em;">Description</label>
+            <textarea id="description" name="description" required rows="4" placeholder="Describe your project..." style="width: 100%; padding: 0.5em; border: 2px solid #000; font-family: inherit; resize: vertical;"></textarea>
+            <Button type="button" id="autofill-readme" style="margin-top: 0.25em; font-size: 0.85em; display: none;">Autofill description from README</Button>
+          </div>
+          <div>
+            <label style="display: block; font-weight: 600; margin-bottom: 0.25em;">Hackatime Projects</label>
+            <div id="inline-project-checkboxes" class="project-checkboxes" style="max-height: 200px;">
+              <p id="inline-project-loading">Loading projects...</p>
+            </div>
+          </div>
+          <div>
+            { isYswsEligible ? (
+              <label class="prize-checkbox-label">
+                <input type="checkbox" id="wants-prize" name="wantsPrize" class="prize-checkbox" />
+                <div>
+                  <span>I want the <b>$5/hr hosting credit</b> prize</span>
+                  <p style="color: #666; font-size: 0.85em; margin: 0.25em 0 0 0;">You'll get a DM on Slack with your prize! This will be an HCB grant.</p>
+                </div>
+              </label>
+            ) : (
+              <p style="color: #666; font-size: 0.9em; margin: 0;">Prize selection is only available for YSWS-eligible users. You can still submit your frame!</p>
+            ) }
+          </div>
+          <div id="submission-error" style="color: red; display: none;"></div>
+          <div class="buttons">
+            <Button id="submit-project" type="submit">Submit for review</Button>
+          </div>
+        </form>
       </Modal>
     ) }
 
-    { currentUser && (
-      <Modal id="project-selection-modal" title="Select Hackatime Projects" closeButtonId="project-modal-close" class="modal-hidden">
-        <div id="project-loading" class="modal-loading">
-          Loading projects...
-        </div>
-        <div id="project-list" class="modal-hidden">
-          <p class="project-instruction"><strong>Select at least one project</strong> to associate with this frame:</p>
-          <div id="project-checkboxes" class="project-checkboxes"></div>
-          <div class="buttons modal-buttons">
-            <Button id="continue-with-projects" disabled>Continue</Button>
-            <p id="selection-hint" class="selection-hint">Please select at least one project to continue</p>
-          </div>
-        </div>
-        <div id="project-error" class="modal-error">
-          <p>Failed to load projects. You can continue without selecting projects.</p>
-          <div class="buttons modal-buttons">
-            <Button id="continue-without-projects">Continue anyway</Button>
-          </div>
-        </div>
-      </Modal>
-    ) }
 
     <div id="hover-tile"></div>
 		
     <script>
       // Main canvas controller
-      import { CANVAS_HEIGHT, CANVAS_WIDTH, TILE_SIZE } from "../config";
+      import { CANVAS_HEIGHT, CANVAS_WIDTH, TILE_SIZE, SECONDS_PER_TILE } from "../config";
       import { assert, type Vector2 } from "../util";
       import type { ApiTile, ApiFrame, ApiMapResponse } from "./api/map";
 
@@ -396,11 +513,14 @@ if (currentUser) {
       const main = document.querySelector("main")!;
 
       let offset = { x: 0, y: 0 };
+      let zoom = 1;
+      const MIN_ZOOM = 0.1;
+      const MAX_ZOOM = 3;
       let dragStart = { x: 0, y: 0 };
       let isDragging = false;
-      let isShiftPressed = false;
       
       // Place mode variables
+      let isShiftPressed = false;
       let isPlaceMode = false;
       let clickStartPos: Vector2 | null = null;
       let currentHoverTileX: number | null = null;
@@ -510,17 +630,25 @@ if (currentUser) {
         };
       }
 
+      function applyTransform() {
+        main.style.transform = `translate(${offset.x}px, ${offset.y}px) scale(${zoom})`;
+        main.style.transformOrigin = "0 0";
+      }
+
       async function setOffset(value: Vector2) {
         offset = value;
-        main.style.transform = `translate(${offset.x}px, ${offset.y}px)`;
+        applyTransform();
         
         // Update hash with current coordinates (throttled)
         updateHashThrottled(offset);
 
-        const tlTile = screenToTile(value);
+        // Account for zoom when calculating visible tile region
+        const viewW = window.innerWidth / zoom;
+        const viewH = window.innerHeight / zoom;
+        const tlTile = screenToTile({ x: -value.x / zoom, y: -value.y / zoom });
         const brTile = screenToTile({
-          x: value.x + (CANVAS_WIDTH * TILE_SIZE),
-          y: value.y + (CANVAS_HEIGHT * TILE_SIZE)
+          x: (-value.x / zoom) + viewW,
+          y: (-value.y / zoom) + viewH
         });
 
         // Wait a short while, and check if the value has changed again - if so, we won't bother
@@ -550,17 +678,14 @@ if (currentUser) {
       }
 
       function updateCursor() {
-        // Update cursor based on state
         if (isDragging) {
           body.style.cursor = "grabbing";
-        } else if (isShiftPressed) {
-          body.style.cursor = "grab";
         } else {
-          body.style.cursor = "default";
+          body.style.cursor = "grab";
         }
-        
-        // Apply frame-nofocus class when shift is held (panning mode) or in place mode
-        main.classList.toggle("frame-nofocus", isShiftPressed || isPlaceMode);
+
+        // Disable iframe pointer events while dragging, holding shift, or in place mode
+        main.classList.toggle("frame-nofocus", isDragging || isShiftPressed || isPlaceMode);
       }
 
       /**
@@ -684,18 +809,21 @@ if (currentUser) {
       }
 
       body.addEventListener("mousedown", (ev) => {
-        // Only start dragging if Shift key is held down
-        if (ev.shiftKey) {
-          setIsDragging(true);
-          dragStart = {
-            x: ev.clientX - offset.x,
-            y: ev.clientY - offset.y
-          };
-        }
-
         if (isPlaceMode) {
           clickStartPos = { x: ev.clientX, y: ev.clientY };
+
+          // Don't start drag if hovering over a valid placement tile
+          if (currentHoverTileX !== null && currentHoverTileY !== null &&
+              isValidPlacement(currentHoverTileX, currentHoverTileY)) {
+            return;
+          }
         }
+
+        setIsDragging(true);
+        dragStart = {
+          x: ev.clientX - offset.x,
+          y: ev.clientY - offset.y
+        };
       });
 
       body.addEventListener("mousemove", (ev) => {
@@ -742,7 +870,34 @@ if (currentUser) {
         setIsDragging(false);
       });
 
-      // Track shift key state for drag mode
+      // Zoom via scroll wheel, centered on cursor
+      body.addEventListener("wheel", (ev) => {
+        // Don't intercept scroll when a modal is open
+        if (document.querySelector<HTMLElement>("#create-frame-modal")?.style.display === "block") return;
+
+        ev.preventDefault();
+
+        const zoomFactor = 1 - ev.deltaY * 0.001;
+        const newZoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoom * zoomFactor));
+
+        // Zoom toward cursor position
+        const mouseX = ev.clientX;
+        const mouseY = ev.clientY;
+
+        // Point under cursor in canvas space before zoom
+        const canvasX = (mouseX - offset.x) / zoom;
+        const canvasY = (mouseY - offset.y) / zoom;
+
+        zoom = newZoom;
+
+        // Adjust offset so the point under cursor stays fixed
+        setOffset({
+          x: mouseX - canvasX * zoom,
+          y: mouseY - canvasY * zoom,
+        });
+      }, { passive: false });
+
+      // Track shift key to allow dragging over iframes
       document.addEventListener("keydown", (ev) => {
         if (ev.key === "Shift" && !isShiftPressed) {
           isShiftPressed = true;
@@ -754,10 +909,6 @@ if (currentUser) {
         if (ev.key === "Shift" && isShiftPressed) {
           isShiftPressed = false;
           updateCursor();
-          // If we were dragging and shift is released, stop dragging
-          if (isDragging) {
-            setIsDragging(false);
-          }
         }
       });
 
@@ -869,7 +1020,7 @@ if (currentUser) {
 
       function updateFrameTileCounts(frameId: number, remainingTime: number) {
         // Calculate new available tile count
-        const newAvailableTiles = Math.max(0, Math.floor(remainingTime / 3600));
+        const newAvailableTiles = Math.max(0, Math.floor(remainingTime / SECONDS_PER_TILE));
         
         // Find and update the frame info text
         const frameItems = document.querySelectorAll('.frame-item');
@@ -929,8 +1080,8 @@ if (currentUser) {
         if (!isPlaceMode)
           return;
 
-        const canvasX = screenCoord.x - offset.x; // screen-space -> canvas-space coords
-        const canvasY = screenCoord.y - offset.y;
+        const canvasX = (screenCoord.x - offset.x) / zoom;
+        const canvasY = (screenCoord.y - offset.y) / zoom;
         const tileX = Math.floor(canvasX / TILE_SIZE);
         const tileY = Math.floor(canvasY / TILE_SIZE);
 
@@ -942,8 +1093,10 @@ if (currentUser) {
           return;
         }
 
-        hoverTile.style.left = `${(tileX * TILE_SIZE) + offset.x}px`;
-        hoverTile.style.top = `${(tileY * TILE_SIZE) + offset.y}px`;
+        hoverTile.style.left = `${(tileX * TILE_SIZE) * zoom + offset.x}px`;
+        hoverTile.style.top = `${(tileY * TILE_SIZE) * zoom + offset.y}px`;
+        hoverTile.style.width = `${TILE_SIZE * zoom}px`;
+        hoverTile.style.height = `${TILE_SIZE * zoom}px`;
         hoverTile.style.display = "block";
 
         // Update hover tile color based on validity
@@ -953,40 +1106,6 @@ if (currentUser) {
 
         currentHoverTileX = tileX;
         currentHoverTileY = tileY;
-      }
-
-      async function handleUpdateTimeClick(frameId: number) {
-        const confirmed = confirm(
-          "Are you sure you want to update your frame's time?\n\n" +
-          "This will send your project back to the review queue, but you'll get more tiles based on your updated coding time."
-        );
-        
-        if (!confirmed) {
-          return;
-        }
-
-        try {
-          const response = await fetch("/api/update-frame-time", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json"
-            },
-            body: JSON.stringify({ frameId })
-          });
-
-          const result = await response.json();
-
-          if (response.ok) {
-            alert(result.message || "Frame has been sent back for review!");
-            // Refresh the page to show updated status
-            window.location.reload();
-          } else {
-            alert(`Error: ${result.message || "Failed to update frame time"}`);
-          }
-        } catch (error) {
-          console.error("Error updating frame time:", error);
-          alert("An error occurred while updating frame time. Please try again.");
-        }
       }
 
       // Add event listeners for place tile buttons
@@ -1004,13 +1123,6 @@ if (currentUser) {
           }
         }
         
-        // Handle update time button clicks
-        if (target && target.classList.contains("btn-update-time")) {
-          const frameId = parseInt(target.getAttribute("data-frame-id") || "0");
-          if (frameId > 0) {
-            handleUpdateTimeClick(frameId);
-          }
-        }
       });
 
       // Override existing mousemove handler to include place mode
@@ -1099,7 +1211,7 @@ if (currentUser) {
             
             // Check if more tiles are available, only exit place mode if no more tiles can be placed
             const remainingTime = result.frame?.remainingTime || 0;
-            const canPlaceMore = remainingTime >= 3600; // Each tile requires 1 hour (3600 seconds)
+            const canPlaceMore = remainingTime >= SECONDS_PER_TILE;
             
             if (!canPlaceMore) {
               // Exit place mode if no more tiles can be placed
@@ -1146,195 +1258,142 @@ if (currentUser) {
       const btnLogin = document.querySelector<HTMLButtonElement>("#btn-login");
       if (btnLogin) {
         btnLogin.addEventListener("click", () => {
-          const url = new URL("https://slack.com/oauth/v2/authorize");
-          url.searchParams.set("client_id", import.meta.env.PUBLIC_SLACK_CLIENT_ID);
-          url.searchParams.set("user_scope", "identity.basic,identity.email");
-          url.searchParams.set("redirect_uri", `${location.origin}/api/slack-callback`);
-
-          location.href = url.toString();
+          location.href = "/auth/login";
         });
       }
-
-
     </script>
 
     <script>
-      import { FRAME_CREATE_FORM_URL } from "../config";
-      import { assert } from "../util";
       import type { ApiHackatimeProjectsResponse } from "./api/hackatime-projects";
 
-
       const createFrameModal = document.querySelector<HTMLDivElement>("#create-frame-modal");
-      const createFrameIframe = document.querySelector<HTMLIFrameElement>("#create-frame-iframe");
       const modalClose = document.querySelector<HTMLDivElement>("#modal-close");
-      
-      const projectSelectionModal = document.querySelector<HTMLDivElement>("#project-selection-modal");
-      const projectModalClose = document.querySelector<HTMLDivElement>("#project-modal-close");
-      const projectLoading = document.querySelector<HTMLDivElement>("#project-loading");
-      const projectList = document.querySelector<HTMLDivElement>("#project-list");
-      const projectError = document.querySelector<HTMLDivElement>("#project-error");
-      const projectCheckboxes = document.querySelector<HTMLDivElement>("#project-checkboxes");
-      const continueWithProjects = document.querySelector<HTMLButtonElement>("#continue-with-projects");
-      const selectionHint = document.querySelector<HTMLParagraphElement>("#selection-hint");
-      const continueWithoutProjects = document.querySelector<HTMLButtonElement>("#continue-without-projects");
+      const submissionForm = document.querySelector<HTMLFormElement>("#submission-form");
+      const repoUrlInput = document.querySelector<HTMLInputElement>("#repo-url");
+      const autofillBtn = document.querySelector<HTMLButtonElement>("#autofill-readme");
+      const descriptionInput = document.querySelector<HTMLTextAreaElement>("#description");
+      const inlineProjectCheckboxes = document.querySelector<HTMLDivElement>("#inline-project-checkboxes");
+      const submissionError = document.querySelector<HTMLDivElement>("#submission-error");
 
       function formatTime(seconds: number): string {
         const hours = Math.floor(seconds / 3600);
         const minutes = Math.floor((seconds % 3600) / 60);
-        if (hours > 0) {
-          return `${hours}h ${minutes}m`;
-        }
+        if (hours > 0) return `${hours}h ${minutes}m`;
         return `${minutes}m`;
       }
 
-      async function openCreateFrameModal(selectedProjects: string[] = []) {
-        if (createFrameModal && createFrameIframe) {
-          let url = FRAME_CREATE_FORM_URL;
-          const params = new URLSearchParams();
-          
-          if (selectedProjects.length > 0) {
-            params.set('hkp', selectedProjects.join(','));
-          }
-          
-          const response = await fetch('/api/create-authorship-token', { method: 'POST' });
-          if (!response.ok) {
-            console.error("(openCreateFrameModal) /api/create-authorship-token failed!", response, await response.text());
-            throw new Error(`/api/create-authorship-token failed with HTTP ${response.status}`);
-          }
-
-          const data = await response.json();
-          params.set('atk', data.token);
-
-          console.log(`(debug) form query params: ${params.toString()}`);
-          
-          url += `?${params.toString()}`;
-
-          createFrameIframe.src = url;
-          createFrameModal.style.display = "block";
-        }
-      }
-
-      function closeProjectSelectionModal() {
-        if (projectSelectionModal) {
-          projectSelectionModal.classList.add("modal-hidden");
-        }
-      }
-
       function closeCreateFrameModal() {
-        if (createFrameModal && createFrameIframe) {
+        if (createFrameModal) {
           createFrameModal.style.display = "none";
-          createFrameIframe.src = "";
         }
       }
 
-      async function loadProjects() {
-        try {
-          if (!projectLoading || !projectList || !projectError || !projectCheckboxes) return;
-          
-          projectLoading.classList.remove("modal-hidden");
-          projectList.classList.add("modal-hidden");
-          projectError.classList.add("modal-hidden");
+      // Show autofill button when repo URL looks like GitHub
+      if (repoUrlInput && autofillBtn) {
+        repoUrlInput.addEventListener("input", () => {
+          const isGitHub = /^https?:\/\/(www\.)?github\.com\/[^/]+\/[^/]+/.test(repoUrlInput.value);
+          autofillBtn.style.display = isGitHub ? "inline-block" : "none";
+        });
 
-          const response = await fetch("/api/hackatime-projects", { method: "POST" });
+        autofillBtn.addEventListener("click", async () => {
+          autofillBtn.disabled = true;
+          autofillBtn.textContent = "Loading...";
+          try {
+            const res = await fetch("/api/submissions/autofill-readme", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ repoUrl: repoUrlInput.value }),
+            });
+            if (res.ok) {
+              const data = await res.json();
+              if (data.readme && descriptionInput) {
+                descriptionInput.value = data.readme;
+              }
+            }
+          } catch (e) {
+            console.error("Failed to autofill README:", e);
+          } finally {
+            autofillBtn.disabled = false;
+            autofillBtn.textContent = "Autofill description from README";
+          }
+        });
+      }
+
+      // Load Hackatime projects inline, optionally pre-selecting some
+      async function loadInlineProjects(preselect?: string[], excludeFrameId?: number) {
+        if (!inlineProjectCheckboxes) return;
+        try {
+          const fetchOpts: RequestInit = {
+            method: "POST",
+            ...(excludeFrameId ? {
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ excludeFrameId }),
+            } : {}),
+          };
+          const response = await fetch("/api/hackatime-projects", fetchOpts);
           if (!response.ok) throw new Error("Failed to fetch projects");
-          
           const data: ApiHackatimeProjectsResponse = await response.json();
-          
-          projectCheckboxes.innerHTML = "";
-          
+
+          inlineProjectCheckboxes.innerHTML = "";
           if (data.projects.length === 0) {
-            projectCheckboxes.innerHTML = "<p>No projects found. Make sure you've worked on your project for at least an hour!</p>";
+            inlineProjectCheckboxes.innerHTML = "<p>No projects found. Make sure you've coded for at least a minute!</p>";
           } else {
             data.projects.forEach(project => {
               const item = document.createElement("div");
               item.className = "project-item";
+              const checked = preselect?.includes(project.name) ? "checked" : "";
               item.innerHTML = `
-                <input type="checkbox" id="project-${project.name}" value="${project.name}">
-                <label for="project-${project.name}" class="project-name">${project.name}</label>
+                <input type="checkbox" id="iproject-${project.name}" name="hackatimeProject" value="${project.name}" ${checked}>
+                <label for="iproject-${project.name}" class="project-name">${project.name}</label>
                 <span class="project-time">${formatTime(project.seconds)}</span>
               `;
-              
-              const checkbox = item.querySelector('input[type="checkbox"]') as HTMLInputElement;
-              if (checkbox) {
-                checkbox.addEventListener('change', updateContinueButtonState);
-              }
-              
-              projectCheckboxes.appendChild(item);
+              inlineProjectCheckboxes.appendChild(item);
             });
           }
-          
-          // Update button state after loading projects
-          updateContinueButtonState();
-          
-          projectLoading.classList.add("modal-hidden");
-          projectList.classList.remove("modal-hidden");
         } catch (error) {
           console.error("Failed to load projects:", error);
-          if (projectLoading) projectLoading.classList.add("modal-hidden");
-          if (projectError) projectError.classList.remove("modal-hidden");
+          inlineProjectCheckboxes.innerHTML = "<p>Failed to load projects. Please try again.</p>";
         }
       }
 
-      function getSelectedProjects(): string[] {
-        if (!projectCheckboxes) return [];
-        const checkboxes = projectCheckboxes.querySelectorAll<HTMLInputElement>('input[type="checkbox"]:checked');
-        return Array.from(checkboxes).map(cb => cb.value);
+      function openSubmissionModal(prefill?: { frameId: number; iframeUrl: string; repoUrl: string; description: string; hackatimeProjectNames: string; wantsPrize: boolean }) {
+        if (!createFrameModal) return;
+        createFrameModal.style.display = "block";
+
+        if (prefill) {
+          const iframeInput = document.querySelector<HTMLInputElement>("#iframe-url");
+          const repoInput = document.querySelector<HTMLInputElement>("#repo-url");
+          const descInput = document.querySelector<HTMLTextAreaElement>("#description");
+          const prizeInput = document.querySelector<HTMLInputElement>("#wants-prize");
+
+          if (iframeInput) iframeInput.value = prefill.iframeUrl;
+          if (repoInput) {
+            repoInput.value = prefill.repoUrl;
+            repoInput.dispatchEvent(new Event("input"));
+          }
+          if (descInput) descInput.value = prefill.description;
+          if (prizeInput) prizeInput.checked = prefill.wantsPrize;
+
+          // Load projects, exclude the current frame's used projects, and pre-select previous ones
+          loadInlineProjects(prefill.hackatimeProjectNames.split(",").map(s => s.trim()), prefill.frameId);
+        } else {
+          loadInlineProjects();
+        }
       }
 
-      function updateContinueButtonState() {
-        const selectedProjects = getSelectedProjects();
-        const hasSelection = selectedProjects.length > 0;
-        
-        if (continueWithProjects) {
-          continueWithProjects.disabled = !hasSelection;
-        }
-        
-        if (selectionHint) {
-          selectionHint.classList.toggle("modal-hidden", hasSelection);
-        }
-      }
-
-      // Create frame button controller
+      // Create frame button opens modal and loads projects
       const btnCreateFrame = document.querySelector<HTMLButtonElement>("#btn-create-frame");
       if (btnCreateFrame) {
-        btnCreateFrame.addEventListener("click", () => {
-          if (projectSelectionModal) {
-            projectSelectionModal.classList.remove("modal-hidden");
-            loadProjects();
-          }
+        btnCreateFrame.addEventListener("click", () => openSubmissionModal());
+      }
+
+      // Re-ship buttons pre-fill the form with previous submission data
+      document.querySelectorAll<HTMLButtonElement>(".btn-reship").forEach(btn => {
+        btn.addEventListener("click", () => {
+          const data = JSON.parse(btn.dataset.submission!);
+          openSubmissionModal(data);
         });
-      }
-
-
-
-      if (projectModalClose) {
-        projectModalClose.addEventListener("click", closeProjectSelectionModal);
-      }
-
-      if (projectSelectionModal) {
-        projectSelectionModal.addEventListener("click", (ev) => {
-          if (ev.target === projectSelectionModal || (ev.target as Element).classList.contains("modal-backdrop")) {
-            closeProjectSelectionModal();
-          }
-        });
-      }
-
-      if (continueWithProjects) {
-        continueWithProjects.addEventListener("click", () => {
-          const selectedProjects = getSelectedProjects();
-          if (selectedProjects.length > 0) {
-            closeProjectSelectionModal();
-            openCreateFrameModal(selectedProjects);
-          }
-        });
-      }
-
-      if (continueWithoutProjects) {
-        continueWithoutProjects.addEventListener("click", () => {
-          closeProjectSelectionModal();
-          openCreateFrameModal();
-        });
-      }
+      });
 
       if (modalClose) {
         modalClose.addEventListener("click", closeCreateFrameModal);
@@ -1348,72 +1407,58 @@ if (currentUser) {
         });
       }
 
-      // Listen for frame creation completion from iframe
-      window.addEventListener("message", (event) => {
-        // Verify the origin for security
-        if (event.origin !== window.location.origin) {
-          return;
-        }
-        
-        if (event.data && event.data.type === "frameCreated") {
-          console.log("Frame created:", event.data.frame);
-          
-          // Close the modal
-          closeCreateFrameModal();
-          
-          // Refresh the page to show the new frame
-          window.location.reload();
-        }
-      });
-    </script>
+      // Handle submission
+      if (submissionForm) {
+        submissionForm.addEventListener("submit", async (ev) => {
+          ev.preventDefault();
+          if (submissionError) submissionError.style.display = "none";
 
-    <script>
-      import { BEGIN_DATE, END_DATE } from "../config";
+          const formData = new FormData(submissionForm);
+          const selectedProjects = formData.getAll("hackatimeProject") as string[];
 
-      function updateCountdown() {
-        const now = new Date();
-        const beginDate = new Date(BEGIN_DATE);
-        const endDate = new Date(END_DATE);
-        const timerElement = document.getElementById("countdown-timer");
-        
-        if (!timerElement) return;
+          if (selectedProjects.length === 0) {
+            if (submissionError) {
+              submissionError.textContent = "Please select at least one Hackatime project.";
+              submissionError.style.display = "block";
+            }
+            return;
+          }
 
-        if (now < beginDate) {
-          // Event hasn't started yet
-          const timeDiff = beginDate.getTime() - now.getTime();
-          
-          const days = Math.floor(timeDiff / (1000 * 60 * 60 * 24));
-          const hours = Math.floor((timeDiff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
-          const minutes = Math.floor((timeDiff % (1000 * 60 * 60)) / (1000 * 60));
-          const seconds = Math.floor((timeDiff % (1000 * 60)) / 1000);
-          
-          timerElement.innerHTML = `Event starts in <b>${days}d ${hours}h ${minutes}m ${seconds}s</b>.`;
-        } else if (now >= endDate) {
-          // Event has ended
-          timerElement.innerHTML = `Submissions ended on ${endDate.toLocaleDateString("en-US", { 
-            year: "numeric", 
-            month: "long", 
-            day: "numeric" 
-          })}.`;
-        } else {
-          // Event is active
-          const timeDiff = endDate.getTime() - now.getTime();
-          
-          const days = Math.floor(timeDiff / (1000 * 60 * 60 * 24));
-          const hours = Math.floor((timeDiff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
-          const minutes = Math.floor((timeDiff % (1000 * 60 * 60)) / (1000 * 60));
-          const seconds = Math.floor((timeDiff % (1000 * 60)) / 1000);
-          
-          timerElement.innerHTML = `Submissions end in <b>${days}d ${hours}h ${minutes}m ${seconds}s</b>.`;
-        }
+          const submitBtn = submissionForm.querySelector<HTMLButtonElement>("#submit-project");
+          if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = "Submitting..."; }
+
+          try {
+            const res = await fetch("/api/submissions/create", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                iframeUrl: formData.get("iframeUrl"),
+                repoUrl: formData.get("repoUrl"),
+                description: formData.get("description"),
+                hackatimeProjectNames: selectedProjects,
+                wantsPrize: !!formData.get("wantsPrize"),
+              }),
+            });
+
+            if (!res.ok) {
+              const err = await res.json();
+              throw new Error(err.error || "Submission failed");
+            }
+
+            closeCreateFrameModal();
+            window.location.reload();
+          } catch (error: any) {
+            if (submissionError) {
+              submissionError.textContent = error.message || "Submission failed. Please try again.";
+              submissionError.style.display = "block";
+            }
+          } finally {
+            if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = "Submit for review"; }
+          }
+        });
       }
-
-      // Update immediately
-      updateCountdown();
-      
-      // Update every second
-      setInterval(updateCountdown, 1000);
     </script>
+
 
 
 	</body>

@@ -1,9 +1,5 @@
 import { z } from "zod";
 
-export const InternalSecretSchema = z.object({
-  secret: z.string().min(1, "Secret is required")
-});
-
 export function jsonResponse(data: unknown) {
   return new Response(JSON.stringify(data), {
     status: 200,
