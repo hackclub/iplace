@@ -9,7 +9,8 @@ export const GET: APIRoute = async ({ url, redirect }) => {
     return new Response("Missing authorization code", { status: 400 });
   }
 
-  const redirectUri = new URL("/auth/callback", url.origin).toString();
+  const base = import.meta.env.PUBLIC_BASE_URL || url.origin;
+  const redirectUri = new URL("/auth/callback", base).toString();
 
   try {
     const tokenResponse = await exchangeHCACode(code, redirectUri);
