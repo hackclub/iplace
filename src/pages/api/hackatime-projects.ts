@@ -1,7 +1,7 @@
 import type { APIRoute } from "astro";
 import { getUserFromRequest, notAuthedResponse } from "../../lib/auth";
 import { Hackatime } from "../../hackatime";
-import { BEGIN_DATE } from "../../config";
+import { BEGIN_DATE, SECONDS_PER_TILE } from "../../config";
 import { jsonResponse } from "../../lib/api-util";
 import prisma from "../../lib/prisma";
 
@@ -50,7 +50,7 @@ export const POST: APIRoute = async ({ request }) => {
     const response: ApiHackatimeProjectsResponse = {
         projects: allProjects
             .filter(x => new Date(x.last_heartbeat) >= BEGIN_DATE)
-            .filter(x => x.total_seconds > 60/*min*/ * 60/*sec*/)
+            .filter(x => x.total_seconds >= SECONDS_PER_TILE)
             .filter(x => x.total_heartbeats > 0)
             .filter(x => !usedProjectNames.has(x.name))
             .map(x => (
