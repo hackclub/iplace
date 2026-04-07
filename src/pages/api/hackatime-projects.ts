@@ -26,7 +26,7 @@ export const GET: APIRoute = async ({ request }) => {
     const url = new URL(request.url);
     const excludeFrameId = parseInt(url.searchParams.get("excludeFrameId") ?? "", 10) || null;
 
-    const allProjects = await hackatime.getProjectsFor(user.slackId);
+    const allProjects = await hackatime.getProjectsFor(user.slackId, BEGIN_DATE);
 
     const userFrames = await prisma.frame.findMany({
         where: { ownerId: user.id },

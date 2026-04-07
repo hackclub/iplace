@@ -50,8 +50,7 @@ export const POST: APIRoute = async ({ request }) => {
   }
 
   // Verify Hackatime projects exist and have sufficient time
-  const allProjects = await hackatime.getProjectsFor(user.slackId);
-  const beginDate = new Date(BEGIN_DATE);
+  const allProjects = await hackatime.getProjectsFor(user.slackId, BEGIN_DATE);
 
   for (const projectName of hackatimeProjectNames) {
     const project = allProjects.find(p => p.name === projectName);
@@ -61,7 +60,7 @@ export const POST: APIRoute = async ({ request }) => {
     if (project.total_seconds < 60) {
       return jsonError(400, `Hackatime project "${projectName}" has less than 1 minute of time`);
     }
-    if (new Date(project.last_heartbeat) < beginDate) {
+    if (new Date(project.last_heartbeat) < BEGIN_DATE) {
       return jsonError(400, `Hackatime project "${projectName}" has no activity after the program start date`);
     }
   }

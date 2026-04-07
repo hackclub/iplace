@@ -19,8 +19,13 @@ export class Hackatime {
         this.key = key;
     }
 
-    async getProjectsFor(username: string): Promise<HackatimeProject[]> {
-        const res = await fetch(`https://hackatime.hackclub.com/api/v1/users/${username}/projects/details`, {
+    async getProjectsFor(username: string, startDate?: Date): Promise<HackatimeProject[]> {
+        const url = new URL(`https://hackatime.hackclub.com/api/v1/users/${username}/projects/details`);
+        if (startDate) {
+            url.searchParams.set("start_date", startDate.toISOString());
+        }
+
+        const res = await fetch(url, {
             method: "GET",
             headers: new Headers({
                 "User-Agent": "iplace/1.0.0",

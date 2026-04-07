@@ -2,7 +2,7 @@
 import AdminLayout from "../../components/AdminLayout.astro";
 import prisma from "../../lib/prisma";
 import { Hackatime } from "../../hackatime";
-import { SECONDS_PER_TILE } from "../../config";
+import { SECONDS_PER_TILE, BEGIN_DATE } from "../../config";
 import { getSlackUsernames } from "../../lib/slack";
 import type { SubmissionStatus } from "../../prisma/generated/client";
 
@@ -21,7 +21,7 @@ const hackatimeTimes = new Map<number, number>(); // submission id -> total seco
 for (const sub of submissions) {
   if (sub.status !== "PENDING") continue;
   try {
-    const projects = await hackatime.getProjectsFor(sub.owner.slackId);
+    const projects = await hackatime.getProjectsFor(sub.owner.slackId, BEGIN_DATE);
     const projectNames = sub.hackatimeProjectNames.split(",").map(n => n.trim());
     let total = 0;
     for (const name of projectNames) {
