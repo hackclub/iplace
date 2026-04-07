@@ -3,7 +3,7 @@ import { z } from "zod";
 import { getAdminFromRequest, notAdminResponse } from "../../../../../lib/admin";
 import { validateRequestBody, jsonError, jsonResponse } from "../../../../../lib/api-util";
 import prisma from "../../../../../lib/prisma";
-import { SECONDS_PER_TILE } from "../../../../../config";
+import { SECONDS_PER_TILE, BEGIN_DATE } from "../../../../../config";
 import { Hackatime } from "../../../../../hackatime";
 import { syncSubmissionToAirtable } from "../../../../../lib/airtable";
 import { sendSlackDM } from "../../../../../lib/slack";
@@ -40,7 +40,7 @@ export const POST: APIRoute = async ({ params, request }) => {
 
   // Calculate approved time from Hackatime
   const projectNamesList = submission.hackatimeProjectNames.split(",").map(n => n.trim());
-  const allProjects = await hackatime.getProjectsFor(submission.owner.slackId);
+  const allProjects = await hackatime.getProjectsFor(submission.owner.slackId, BEGIN_DATE);
 
   let approvedTime = 0;
   for (const projectName of projectNamesList) {
