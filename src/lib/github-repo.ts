@@ -30,7 +30,7 @@ function githubHeaders(): Record<string, string> {
   return headers;
 }
 
-const MAX_LISTED_FILES = 300;
+const MAX_LISTED_FILES = 120;
 
 /** Returns a plain-text listing of every file in the repo's default branch, for the reviewer to read. */
 export async function listRepoFiles(ref: RepoRef): Promise<string> {
@@ -64,7 +64,7 @@ export async function listRepoFiles(ref: RepoRef): Promise<string> {
 }
 
 const MAX_FILE_BYTES = 100_000;
-const MAX_FILE_CHARS = 8000;
+const MAX_FILE_CHARS = 3000;
 
 /** Reads a single file's text content from the repo's default branch. */
 export async function readRepoFile(ref: RepoRef, path: string): Promise<string> {

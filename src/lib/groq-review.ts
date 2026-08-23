@@ -1,14 +1,18 @@
 import type * as db from "../prisma/generated/client";
 import { parseGitHubRepo, listRepoFiles, readRepoFile, type RepoRef } from "./github-repo";
 import { safeFetchText } from "./safe-fetch";
+import { groqChatCompletion, GroqRateLimitError, GroqRequestError } from "./groq-throttle";
 
 const GROQ_API_KEY = import.meta.env.GROQ_API_KEY;
-const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
 const MODEL = "openai/gpt-oss-120b";
 
-const MAX_ROUNDS = 8;
-const MAX_TOOL_CALLS = 10;
-const MAX_TOOL_CALLS_PER_ROUND = 4;
+// Kept small: openai/gpt-oss-120b is capped at 8000 tokens/minute on Groq's free tier,
+// shared across every review running anywhere in the app (see groq-throttle.ts). Fewer
+// rounds and smaller tool outputs mean each review claims less of that shared budget.
+const MAX_ROUNDS = 5;
+const MAX_TOOL_CALLS = 6;
+const MAX_TOOL_CALLS_PER_ROUND = 2;
+const MAX_COMPLETION_TOKENS = 600;
 
 export class ReviewUnavailableError extends Error {}
 
@@ -109,33 +113,21 @@ directly to the submitter, so phrase it as friendly, specific, actionable feedba
 async function callGroq(messages: any[], tools: any[], toolChoice: any): Promise<any> {
   if (!GROQ_API_KEY) throw new ReviewUnavailableError("GROQ_API_KEY is not configured");
 
-  let response: Response;
   try {
-    response = await fetch(GROQ_URL, {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${GROQ_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: MODEL,
-        messages,
-        tools,
-        tool_choice: toolChoice,
-        temperature: 0.2,
-        max_tokens: 1024,
-      }),
+    return await groqChatCompletion(GROQ_API_KEY, {
+      model: MODEL,
+      messages,
+      tools,
+      tool_choice: toolChoice,
+      temperature: 0.2,
+      max_tokens: MAX_COMPLETION_TOKENS,
     });
-  } catch (error: any) {
-    throw new ReviewUnavailableError(`Failed to reach Groq: ${error.message}`);
+  } catch (error) {
+    if (error instanceof GroqRateLimitError || error instanceof GroqRequestError) {
+      throw new ReviewUnavailableError(error.message);
+    }
+    throw error;
   }
-
-  if (!response.ok) {
-    const text = await response.text().catch(() => "");
-    throw new ReviewUnavailableError(`Groq API error (${response.status}): ${text.slice(0, 500)}`);
-  }
-
-  return response.json();
 }
 
 function safeParseJson(text: string): any {
@@ -165,8 +157,8 @@ async function executeTool(name: string, rawArgs: string, ctx: ToolContext): Pro
         return await readRepoFile(ctx.repoRef, args.path);
       }
       case "fetch_live_site": {
-        const result = await safeFetchText(ctx.submission.iframeUrl, 20_000);
-        const bodySnippet = result.body.slice(0, 6000);
+        const result = await safeFetchText(ctx.submission.iframeUrl, 8_000);
+        const bodySnippet = result.body.slice(0, 2500);
         return [
           `HTTP status: ${result.status}`,
           `Headers: ${JSON.stringify(result.headers)}`,
