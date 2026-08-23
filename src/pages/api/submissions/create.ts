@@ -5,24 +5,33 @@ import { validateRequestBody, jsonError, jsonResponse } from "../../../lib/api-u
 import { getAdminSlackIds } from "../../../lib/admin";
 import { sendSlackDM } from "../../../lib/slack";
 import prisma from "../../../lib/prisma";
-import { Hackatime } from "../../../hackatime";
+import { hackatime } from "../../../lib/hackatime-client";
 import { BEGIN_DATE } from "../../../config";
+import { autoReviewSubmission } from "../../../lib/submission-decisions";
 
 const CreateSubmissionSchema = z.object({
   iframeUrl: z.string().url("iframeUrl must be a valid URL"),
   repoUrl: z.string().url("repoUrl must be a valid URL"),
   description: z.string().min(1, "Description is required").max(5000),
   hackatimeProjectNames: z.array(z.string()).min(1, "At least one Hackatime project is required"),
-  wantsPrize: z.boolean(),
 });
 
-const hackatime = new Hackatime(import.meta.env.HACKATIME_ADMIN_KEY);
+/**
+ * Runs the AI safety/validity review for a freshly-created submission. If the reviewer
+ * itself is unavailable (e.g. Groq is down), the submission is left PENDING and admins
+ * are notified to review it manually as a fallback.
+ */
+async function reviewAndNotifyOnFailure(submissionId: number, iframeUrl: string, userSlackId: string, isUpdate: boolean) {
+  try {
+    await autoReviewSubmission(submissionId);
+  } catch (error) {
+    console.error(`(submissions/create) Automated review failed for submission ${submissionId}:`, error);
 
-async function notifyAdminsOfSubmission(userSlackId: string, iframeUrl: string, isUpdate: boolean) {
-  const adminIds = getAdminSlackIds();
-  const action = isUpdate ? "resubmitted" : "submitted";
-  const message = `📋 <@${userSlackId}> just ${action} a project for review: ${iframeUrl}\nHead to https://iplace.hackclub.com/admin/submissions to review it!`;
-  await Promise.all(adminIds.map(id => sendSlackDM(id, message)));
+    const adminIds = getAdminSlackIds();
+    const action = isUpdate ? "resubmitted" : "submitted";
+    const message = `📋 <@${userSlackId}> just ${action} a project, but the automated review couldn't reach a verdict: ${iframeUrl}\nHead to https://iplace.hackclub.com/admin/submissions to review it manually!`;
+    await Promise.all(adminIds.map(id => sendSlackDM(id, message)));
+  }
 }
 
 /** Strips trailing slashes, query params, and hash from a URL for comparison. */
@@ -42,12 +51,7 @@ export const POST: APIRoute = async ({ request }) => {
   const validation = await validateRequestBody(request, CreateSubmissionSchema);
   if (!validation.success) return validation.response;
 
-  const { iframeUrl, repoUrl, description, hackatimeProjectNames, wantsPrize } = validation.data;
-
-  // Verify YSWS eligibility if user wants the prize
-  if (wantsPrize && user.verificationStatus !== "verified") {
-    return jsonError(403, "You are not YSWS-eligible to claim a prize");
-  }
+  const { iframeUrl, repoUrl, description, hackatimeProjectNames } = validation.data;
 
   // Verify Hackatime projects exist and have sufficient time
   const allProjects = await hackatime.getProjectsFor(user.slackId, BEGIN_DATE);
@@ -87,7 +91,6 @@ export const POST: APIRoute = async ({ request }) => {
           repoUrl,
           description,
           hackatimeProjectNames: hackatimeProjectNames.join(","),
-          wantsPrize,
           ownerId: user.id,
         },
       });
@@ -105,12 +108,13 @@ export const POST: APIRoute = async ({ request }) => {
       return { submission, frame };
     });
 
-    notifyAdminsOfSubmission(user.slackId, iframeUrl, true);
+    await reviewAndNotifyOnFailure(result.submission.id, iframeUrl, user.slackId, true);
+    const finalSubmission = await prisma.submission.findUnique({ where: { id: result.submission.id } });
 
     return jsonResponse({
       success: true,
       updated: true,
-      submission: result.submission,
+      submission: finalSubmission,
       frame: { id: result.frame.id, url: result.frame.url },
     });
   }
@@ -134,7 +138,6 @@ export const POST: APIRoute = async ({ request }) => {
         repoUrl,
         description,
         hackatimeProjectNames: hackatimeProjectNames.join(","),
-        wantsPrize,
         ownerId: user.id,
       },
     });
@@ -152,11 +155,12 @@ export const POST: APIRoute = async ({ request }) => {
     return { submission, frame };
   });
 
-  notifyAdminsOfSubmission(user.slackId, iframeUrl, false);
+  await reviewAndNotifyOnFailure(result.submission.id, iframeUrl, user.slackId, false);
+  const finalSubmission = await prisma.submission.findUnique({ where: { id: result.submission.id } });
 
   return jsonResponse({
     success: true,
-    submission: result.submission,
+    submission: finalSubmission,
     frame: { id: result.frame.id, url: result.frame.url },
   });
 };

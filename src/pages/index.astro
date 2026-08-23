@@ -12,7 +12,6 @@ import Details from "../components/Details.astro";
 import Modal from "../components/Modal.astro";
 
 const currentUser = await getCurrentUser(Astro);
-const isYswsEligible = currentUser?.verificationStatus === "verified";
 
 function normalizeUrl(raw: string): string {
   try {
@@ -33,7 +32,6 @@ interface MergedFrame {
     repoUrl: string;
     description: string;
     hackatimeProjectNames: string;
-    wantsPrize: boolean;
   } | null;
 }
 
@@ -74,7 +72,6 @@ if (currentUser) {
         repoUrl: sub.repoUrl,
         description: sub.description,
         hackatimeProjectNames: sub.hackatimeProjectNames,
-        wantsPrize: sub.wantsPrize,
       } : null,
     });
   }
@@ -89,14 +86,14 @@ if (currentUser) {
 		<meta name="generator" content={Astro.generator} />
 		
 		<title>&lt;iplace&gt; | Hack Club</title>
-		<meta name="description" content="Public canvas of websites in iframes. Code for 10 minutes, place a 100x100px tile, get $5 hosting credit. By Hack Club." />
-		<meta name="keywords" content="hack club, iplace, public canvas, iframe, coding, teenagers, hosting credit, web development, programming" />
+		<meta name="description" content="Public canvas of websites in iframes. Code for 10 minutes, place a 100x100px tile. By Hack Club." />
+		<meta name="keywords" content="hack club, iplace, public canvas, iframe, coding, teenagers, web development, programming" />
 		<meta name="author" content="Hack Club" />
 		<meta name="robots" content="index, follow" />
 		<link rel="canonical" href="https://iplace.hackclub.com" />
 		
 		<meta property="og:title" content="&lt;iplace&gt;" />
-		<meta property="og:description" content="Public canvas of websites in iframes. Code for 10 minutes, place a 100x100px tile, get $5 hosting credit. By Hack Club." />
+		<meta property="og:description" content="Public canvas of websites in iframes. Code for 10 minutes, place a 100x100px tile. By Hack Club." />
 		<meta property="og:type" content="website" />
 		<meta property="og:url" content="https://iplace.hackclub.com" />
 		<meta property="og:site_name" content="Hack Club" />
@@ -108,7 +105,7 @@ if (currentUser) {
 		
 		<meta name="twitter:card" content="summary_large_image" />
 		<meta name="twitter:title" content="&lt;iplace&gt;" />
-		<meta name="twitter:description" content="Public canvas of websites in iframes. Code for 10 minutes, place a 100x100px tile, get $5 hosting credit. By Hack Club." />
+		<meta name="twitter:description" content="Public canvas of websites in iframes. Code for 10 minutes, place a 100x100px tile. By Hack Club." />
 		<meta name="twitter:site" content="@hackclub" />
 		<meta name="twitter:creator" content="@hackclub" />
 		<!-- <meta name="twitter:image" content="https://iplace.hackclub.com/og-image.png" /> -->
@@ -130,7 +127,7 @@ if (currentUser) {
 			"@type": "WebApplication",
 			"name": "iplace",
 			"alternateName": "&lt;iplace&gt;",
-			"description": "Public canvas of websites in iframes. Code for 10 minutes, place a 100x100px tile, get $5 hosting credit. By Hack Club.",
+			"description": "Public canvas of websites in iframes. Code for 10 minutes, place a 100x100px tile. By Hack Club.",
 			"url": "https://iplace.hackclub.com",
 			"applicationCategory": "DeveloperApplication",
 			"operatingSystem": "All",
@@ -149,7 +146,6 @@ if (currentUser) {
 			},
 			"featureList": [
 				"Place iframe tiles on public canvas",
-				"Earn hosting credit for coding time", 
 				"Interactive canvas exploration",
 				"Teen-focused coding community"
 			],
@@ -157,7 +153,7 @@ if (currentUser) {
 				"@type": "Offer",
 				"price": "0",
 				"priceCurrency": "USD",
-				"description": "$5 hosting credit per 10 minutes of coding"
+				"description": "Free to use"
 			}
 		}
 		</script>
@@ -383,32 +379,6 @@ if (currentUser) {
       }
     }
 
-    .prize-checkbox-label {
-      display: flex;
-      align-items: flex-start;
-      gap: 0.75em;
-      cursor: pointer;
-    }
-
-    .prize-checkbox {
-      appearance: none;
-      width: 18px;
-      height: 18px;
-      border: 2px solid #000;
-      background: #fff;
-      margin: 0;
-      cursor: pointer;
-      flex-shrink: 0;
-
-      &:checked {
-        background: #000;
-      }
-
-      &:focus {
-        outline: none;
-      }
-    }
-
     .modal-hidden {
       display: none;
     }
@@ -432,7 +402,7 @@ if (currentUser) {
       
       <p>
         This is a public canvas of websites inside <b>&lt;iframe&gt;</b> elements. Every 10 minutes of coding
-        allows you to place one 100x100px tile! You can also get <b>$5</b> in hosting credit for each hour you code!
+        allows you to place one 100x100px tile!
       </p>
 
       <p>
@@ -496,19 +466,6 @@ if (currentUser) {
             <div id="inline-project-checkboxes" class="project-checkboxes" style="max-height: 200px;">
               <p id="inline-project-loading">Loading projects...</p>
             </div>
-          </div>
-          <div>
-            { isYswsEligible ? (
-              <label class="prize-checkbox-label">
-                <input type="checkbox" id="wants-prize" name="wantsPrize" class="prize-checkbox" />
-                <div>
-                  <span>I want the <b>$5/hr hosting credit</b> prize</span>
-                  <p style="color: #666; font-size: 0.85em; margin: 0.25em 0 0 0;">You'll get a DM on Slack with your prize! This will be an HCB grant.</p>
-                </div>
-              </label>
-            ) : (
-              <p style="color: #666; font-size: 0.9em; margin: 0;">Prize selection is only available for YSWS-eligible users. You can still submit your frame!</p>
-            ) }
           </div>
           <div id="submission-error" style="color: red; display: none;"></div>
           <div class="buttons">
@@ -1386,7 +1343,7 @@ if (currentUser) {
         }
       }
 
-      function openSubmissionModal(prefill?: { frameId: number; iframeUrl: string; repoUrl: string; description: string; hackatimeProjectNames: string; wantsPrize: boolean }) {
+      function openSubmissionModal(prefill?: { frameId: number; iframeUrl: string; repoUrl: string; description: string; hackatimeProjectNames: string }) {
         if (!createFrameModal) return;
         createFrameModal.style.display = "block";
 
@@ -1394,7 +1351,6 @@ if (currentUser) {
           const iframeInput = document.querySelector<HTMLInputElement>("#iframe-url");
           const repoInput = document.querySelector<HTMLInputElement>("#repo-url");
           const descInput = document.querySelector<HTMLTextAreaElement>("#description");
-          const prizeInput = document.querySelector<HTMLInputElement>("#wants-prize");
 
           if (iframeInput) iframeInput.value = prefill.iframeUrl;
           if (repoInput) {
@@ -1402,7 +1358,6 @@ if (currentUser) {
             repoInput.dispatchEvent(new Event("input"));
           }
           if (descInput) descInput.value = prefill.description;
-          if (prizeInput) prizeInput.checked = prefill.wantsPrize;
 
           // Load projects, exclude the current frame's used projects, and pre-select previous ones
           loadInlineProjects(prefill.hackatimeProjectNames.split(",").map(s => s.trim()), prefill.frameId);
@@ -1466,7 +1421,6 @@ if (currentUser) {
                 repoUrl: formData.get("repoUrl"),
                 description: formData.get("description"),
                 hackatimeProjectNames: selectedProjects,
-                wantsPrize: !!formData.get("wantsPrize"),
               }),
             });
 

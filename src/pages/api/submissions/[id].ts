@@ -1,9 +1,11 @@
 import type { APIRoute } from "astro";
 import { z } from "zod";
 import { getUserFromRequest, notAuthedResponse } from "../../../lib/auth";
-import { isAdmin } from "../../../lib/admin";
+import { isAdmin, getAdminSlackIds } from "../../../lib/admin";
 import { validateRequestBody, jsonError, jsonResponse } from "../../../lib/api-util";
 import prisma from "../../../lib/prisma";
+import { autoReviewSubmission } from "../../../lib/submission-decisions";
+import { sendSlackDM } from "../../../lib/slack";
 
 export const GET: APIRoute = async ({ params, request }) => {
   const user = await getUserFromRequest(request);
@@ -29,7 +31,6 @@ const EditSubmissionSchema = z.object({
   repoUrl: z.string().url().optional(),
   description: z.string().min(1).max(5000).optional(),
   hackatimeProjectNames: z.array(z.string()).min(1).optional(),
-  wantsPrize: z.boolean().optional(),
 });
 
 export const PUT: APIRoute = async ({ params, request }) => {
@@ -54,11 +55,6 @@ export const PUT: APIRoute = async ({ params, request }) => {
 
   const data = validation.data;
 
-  // Verify YSWS eligibility if user wants the prize
-  if (data.wantsPrize && user.verificationStatus !== "verified") {
-    return jsonError(403, "You are not YSWS-eligible to claim a prize");
-  }
-
   const updatedSubmission = await prisma.$transaction(async (tx) => {
     const updated = await tx.submission.update({
       where: { id },
@@ -69,7 +65,6 @@ export const PUT: APIRoute = async ({ params, request }) => {
         ...(data.hackatimeProjectNames && {
           hackatimeProjectNames: data.hackatimeProjectNames.join(","),
         }),
-        ...(data.wantsPrize !== undefined && { wantsPrize: data.wantsPrize }),
         status: "PENDING",
         reviewerFeedback: null,
         reviewedAt: null,
@@ -92,5 +87,16 @@ export const PUT: APIRoute = async ({ params, request }) => {
     return updated;
   });
 
-  return jsonResponse({ success: true, submission: updatedSubmission });
+  try {
+    await autoReviewSubmission(id);
+  } catch (error) {
+    console.error(`(submissions/[id]) Automated review failed for submission ${id}:`, error);
+    const adminIds = getAdminSlackIds();
+    const message = `📋 <@${user.slackId}> just resubmitted a project, but the automated review couldn't reach a verdict: ${updatedSubmission.iframeUrl}\nHead to https://iplace.hackclub.com/admin/submissions to review it manually!`;
+    await Promise.all(adminIds.map(adminId => sendSlackDM(adminId, message)));
+  }
+
+  const finalSubmission = await prisma.submission.findUnique({ where: { id } });
+
+  return jsonResponse({ success: true, submission: finalSubmission });
 };
