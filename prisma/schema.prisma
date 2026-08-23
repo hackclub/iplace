@@ -224,6 +224,10 @@ model SubmissionMigrationJob {
   /// The submission currently being reviewed, if any.
   currentSubmissionId Int?
 
+  /// Set to request that the running migration stops after the current submission.
+  /// The runner checks this between submissions and transitions to CANCELLED.
+  cancelRequested     Boolean   @default(false)
+
   /// The last error message encountered, if any.
   lastError           String?
 
@@ -235,5 +239,6 @@ enum MigrationJobStatus {
   IDLE
   RUNNING
   DONE
+  CANCELLED
   FAILED
 }

@@ -59,7 +59,10 @@ function formatTime(seconds: number): string {
           review existed, one at a time. Safe to re-run; only one migration runs at a time.
         </p>
       </div>
-      <button type="button" class="btn btn-migrate" id="btn-start-migration">Start migration</button>
+      <div class="migration-buttons">
+        <button type="button" class="btn btn-migrate" id="btn-start-migration">Start migration</button>
+        <button type="button" class="btn btn-cancel-migrate" id="btn-cancel-migration" hidden>Cancel</button>
+      </div>
     </div>
     <div class="migration-progress" id="migration-progress" hidden>
       <div class="progress-bar"><div class="progress-fill" id="migration-progress-fill"></div></div>
@@ -277,8 +280,16 @@ function formatTime(seconds: number): string {
     font-size: 0.85em;
     color: #333;
   }
+  .migration-buttons {
+    display: flex;
+    gap: 0.5em;
+    flex-shrink: 0;
+  }
   .btn-migrate {
     background: #fff3cd;
+  }
+  .btn-cancel-migrate {
+    background: #f8d7da;
   }
   .btn {
     padding: 0.4em 1em;
@@ -359,17 +370,19 @@ function formatTime(seconds: number): string {
   });
 
   interface MigrationJob {
-    status: "IDLE" | "RUNNING" | "DONE" | "FAILED";
+    status: "IDLE" | "RUNNING" | "DONE" | "CANCELLED" | "FAILED";
     totalCount: number;
     processedCount: number;
     approvedCount: number;
     rejectedCount: number;
     errorCount: number;
     currentSubmissionId: number | null;
+    cancelRequested: boolean;
     lastError: string | null;
   }
 
   const startBtn = document.querySelector<HTMLButtonElement>("#btn-start-migration");
+  const cancelBtn = document.querySelector<HTMLButtonElement>("#btn-cancel-migration");
   const progressEl = document.querySelector<HTMLDivElement>("#migration-progress");
   const progressFillEl = document.querySelector<HTMLDivElement>("#migration-progress-fill");
   const statsEl = document.querySelector<HTMLDivElement>("#migration-stats");
@@ -382,6 +395,11 @@ function formatTime(seconds: number): string {
     if (startBtn) {
       startBtn.disabled = isRunning;
       startBtn.textContent = isRunning ? "Migration running..." : "Start migration";
+    }
+    if (cancelBtn) {
+      cancelBtn.hidden = !isRunning;
+      cancelBtn.disabled = job.cancelRequested;
+      cancelBtn.textContent = job.cancelRequested ? "Cancelling..." : "Cancel";
     }
 
     if (progressEl) progressEl.hidden = job.status === "IDLE" && job.totalCount === 0;
@@ -400,6 +418,7 @@ function formatTime(seconds: number): string {
       if (job.errorCount > 0) parts.push(`${job.errorCount} errored`);
       if (job.status === "RUNNING" && job.currentSubmissionId) parts.push(`currently on submission #${job.currentSubmissionId}`);
       if (job.status === "DONE") parts.push("-- done!");
+      if (job.status === "CANCELLED") parts.push("-- cancelled");
       if (job.status === "FAILED") parts.push(`-- job failed: ${job.lastError ?? "unknown error"}`);
       statsEl.textContent = parts.join(" · ");
     }
@@ -448,6 +467,32 @@ function formatTime(seconds: number): string {
         alert(`Error: ${e.message}`);
         startBtn.disabled = false;
         startBtn.textContent = "Start migration";
+      }
+    });
+  }
+
+  if (cancelBtn) {
+    cancelBtn.addEventListener("click", async () => {
+      cancelBtn.disabled = true;
+      cancelBtn.textContent = "Cancelling...";
+      try {
+        const res = await fetch("/api/admin/submissions/migrate-legacy/cancel", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+        });
+        if (!res.ok) {
+          const err = await res.json();
+          alert(`Error: ${err.error}`);
+          cancelBtn.disabled = false;
+          cancelBtn.textContent = "Cancel";
+          return;
+        }
+        const data = await res.json();
+        renderJob(data.job);
+      } catch (e: any) {
+        alert(`Error: ${e.message}`);
+        cancelBtn.disabled = false;
+        cancelBtn.textContent = "Cancel";
       }
     });
   }

@@ -17,6 +17,7 @@ export async function getMigrationJobStatus() {
     rejectedCount: 0,
     errorCount: 0,
     currentSubmissionId: null,
+    cancelRequested: false,
     lastError: null,
     startedAt: null,
     finishedAt: null,
@@ -54,6 +55,7 @@ export async function startMigrationJob(): Promise<{ started: boolean; job: NonN
         rejectedCount: 0,
         errorCount: 0,
         currentSubmissionId: null,
+        cancelRequested: false,
         lastError: null,
         startedAt: new Date(),
         finishedAt: null,
@@ -77,8 +79,38 @@ export async function startMigrationJob(): Promise<{ started: boolean; job: NonN
   return { started: won, job: job! };
 }
 
+/**
+ * Requests that the running migration stops after the submission it's currently
+ * reviewing. Idempotent: cancelling an already-cancelled or non-running job is a no-op.
+ * Returns whether a running job was actually asked to stop.
+ */
+export async function cancelMigrationJob(): Promise<{ cancelled: boolean; job: NonNullable<MigrationJobSnapshot> }> {
+  const result = await prisma.submissionMigrationJob.updateMany({
+    where: { id: JOB_ID, status: "RUNNING", cancelRequested: false },
+    data: { cancelRequested: true },
+  });
+
+  const job = await getMigrationJobStatus();
+  return { cancelled: result.count === 1, job: job! };
+}
+
 async function runMigrationJob(submissionIds: number[]) {
   for (const submissionId of submissionIds) {
+    // The cancel flag lives in the DB (not process memory), so a cancel issued from any
+    // server instance or admin tab stops the job. The in-flight review is never aborted
+    // mid-way -- we only stop between submissions, keeping every processed one consistent.
+    const jobState = await prisma.submissionMigrationJob.findUnique({
+      where: { id: JOB_ID },
+      select: { cancelRequested: true },
+    });
+    if (jobState?.cancelRequested) {
+      await prisma.submissionMigrationJob.update({
+        where: { id: JOB_ID },
+        data: { status: "CANCELLED", currentSubmissionId: null, finishedAt: new Date() },
+      });
+      return;
+    }
+
     await prisma.submissionMigrationJob.update({
       where: { id: JOB_ID },
       data: { currentSubmissionId: submissionId },
