@@ -50,6 +50,23 @@ function formatTime(seconds: number): string {
 ---
 
 <AdminLayout title="Submissions" activeTab="submissions">
+  <div class="migration-panel" id="migration-panel">
+    <div class="migration-header">
+      <div>
+        <strong>Legacy submission migration</strong>
+        <p class="migration-desc">
+          Runs the AI reviewer over submissions still stuck in manual PENDING review from before automated
+          review existed, one at a time. Safe to re-run; only one migration runs at a time.
+        </p>
+      </div>
+      <button type="button" class="btn btn-migrate" id="btn-start-migration">Start migration</button>
+    </div>
+    <div class="migration-progress" id="migration-progress" hidden>
+      <div class="progress-bar"><div class="progress-fill" id="migration-progress-fill"></div></div>
+      <div class="migration-stats" id="migration-stats"></div>
+    </div>
+  </div>
+
   <div class="filters">
     <a href="/admin/submissions" class:list={{ active: !statusFilter }}>All</a>
     <a href="/admin/submissions?status=PENDING" class:list={{ active: statusFilter === "PENDING" }}>Pending</a>
@@ -66,7 +83,6 @@ function formatTime(seconds: number): string {
         <a href={`https://hackclub.slack.com/team/${sub.owner.slackId}`} target="_blank" rel="noopener" class="owner">{slackNames.get(sub.owner.slackId) ?? sub.owner.slackId}</a>
         <a href={`https://joe.fraud.hackclub.com/profile/${sub.owner.slackId}`} target="_blank" rel="noopener" class="joe-link">[Joe]</a>
         <span class="date">{formatDate(sub.createdAt)}</span>
-        {sub.wantsPrize && <span class="prize-badge">Wants Prize</span>}
       </div>
       <div class="submission-body">
         <div class="field">
@@ -96,10 +112,6 @@ function formatTime(seconds: number): string {
         <div class="submission-actions">
           <form class="approve-form" data-id={sub.id}>
             <div class="approve-row">
-              <label class="checkbox-label">
-                <input type="checkbox" name="syncWithAirtable" />
-                Sync with Airtable
-              </label>
               <label class="override-label">
                 Override mins:
                 <input type="number" name="overrideMinutes" min="0" step="1" value={hackatimeTimes.has(sub.id) ? Math.round(hackatimeTimes.get(sub.id)! / 60).toString() : ""} class="override-input" />
@@ -158,14 +170,6 @@ function formatTime(seconds: number): string {
   .status-pending { background: #fff3cd; border-color: #ffc107; color: #856404; }
   .status-approved { background: #d4edda; border-color: #28a745; color: #155724; }
   .status-rejected { background: #f8d7da; border-color: #dc3545; color: #721c24; }
-  .prize-badge {
-    background: #e0cffc;
-    border: 1px solid #7c3aed;
-    color: #5b21b6;
-    padding: 0.15em 0.5em;
-    font-size: 0.8em;
-    font-weight: 600;
-  }
   .owner { font-weight: 600; }
   .joe-link {
     font-size: 0.8em;
@@ -235,12 +239,46 @@ function formatTime(seconds: number): string {
     resize: vertical;
     min-width: 250px;
   }
-  .checkbox-label {
+  .migration-panel {
+    background: #fff;
+    border: 2px solid #000;
+    padding: 1em;
+    margin-bottom: 1.5em;
+  }
+  .migration-header {
     display: flex;
     align-items: center;
-    gap: 0.3em;
-    cursor: pointer;
-    font-size: 0.9em;
+    justify-content: space-between;
+    gap: 1em;
+    flex-wrap: wrap;
+  }
+  .migration-desc {
+    color: #666;
+    font-size: 0.85em;
+    margin: 0.25em 0 0 0;
+    max-width: 50em;
+  }
+  .migration-progress {
+    margin-top: 1em;
+  }
+  .progress-bar {
+    height: 0.8em;
+    border: 2px solid #000;
+    background: #f5f5f5;
+  }
+  .progress-fill {
+    height: 100%;
+    width: 0%;
+    background: #000;
+    transition: width 0.3s;
+  }
+  .migration-stats {
+    margin-top: 0.5em;
+    font-size: 0.85em;
+    color: #333;
+  }
+  .btn-migrate {
+    background: #fff3cd;
   }
   .btn {
     padding: 0.4em 1em;
@@ -261,7 +299,6 @@ function formatTime(seconds: number): string {
     form.addEventListener("submit", async (ev) => {
       ev.preventDefault();
       const id = form.dataset.id;
-      const syncWithAirtable = form.querySelector<HTMLInputElement>('input[name="syncWithAirtable"]')?.checked ?? false;
       const overrideMinutesInput = form.querySelector<HTMLInputElement>('input[name="overrideMinutes"]');
       const overrideMinutes = overrideMinutesInput?.value ? parseFloat(overrideMinutesInput.value) : undefined;
       const overrideSeconds = overrideMinutes !== undefined ? Math.round(overrideMinutes * 60) : undefined;
@@ -273,7 +310,7 @@ function formatTime(seconds: number): string {
         const res = await fetch(`/api/admin/submissions/${id}/approve`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ syncWithAirtable, ...(overrideSeconds !== undefined && { overrideSeconds }) }),
+          body: JSON.stringify({ ...(overrideSeconds !== undefined && { overrideSeconds }) }),
         });
         if (!res.ok) {
           const err = await res.json();
@@ -320,4 +357,111 @@ function formatTime(seconds: number): string {
       }
     });
   });
+
+  interface MigrationJob {
+    status: "IDLE" | "RUNNING" | "DONE" | "FAILED";
+    totalCount: number;
+    processedCount: number;
+    approvedCount: number;
+    rejectedCount: number;
+    errorCount: number;
+    currentSubmissionId: number | null;
+    lastError: string | null;
+  }
+
+  const startBtn = document.querySelector<HTMLButtonElement>("#btn-start-migration");
+  const progressEl = document.querySelector<HTMLDivElement>("#migration-progress");
+  const progressFillEl = document.querySelector<HTMLDivElement>("#migration-progress-fill");
+  const statsEl = document.querySelector<HTMLDivElement>("#migration-stats");
+
+  let pollHandle: ReturnType<typeof setInterval> | null = null;
+  let submissionsNeedReload = false;
+
+  function renderJob(job: MigrationJob) {
+    const isRunning = job.status === "RUNNING";
+    if (startBtn) {
+      startBtn.disabled = isRunning;
+      startBtn.textContent = isRunning ? "Migration running..." : "Start migration";
+    }
+
+    if (progressEl) progressEl.hidden = job.status === "IDLE" && job.totalCount === 0;
+
+    if (job.totalCount > 0 && progressFillEl) {
+      const pct = Math.min(100, Math.round((job.processedCount / job.totalCount) * 100));
+      progressFillEl.style.width = `${pct}%`;
+    }
+
+    if (statsEl) {
+      const parts = [
+        `${job.processedCount}/${job.totalCount} processed`,
+        `${job.approvedCount} approved`,
+        `${job.rejectedCount} rejected`,
+      ];
+      if (job.errorCount > 0) parts.push(`${job.errorCount} errored`);
+      if (job.status === "RUNNING" && job.currentSubmissionId) parts.push(`currently on submission #${job.currentSubmissionId}`);
+      if (job.status === "DONE") parts.push("-- done!");
+      if (job.status === "FAILED") parts.push(`-- job failed: ${job.lastError ?? "unknown error"}`);
+      statsEl.textContent = parts.join(" · ");
+    }
+  }
+
+  async function pollMigrationStatus() {
+    try {
+      const res = await fetch("/api/admin/submissions/migrate-legacy/status");
+      if (!res.ok) return;
+      const data = await res.json();
+      const job: MigrationJob = data.job;
+      renderJob(job);
+
+      if (job.status === "RUNNING") {
+        submissionsNeedReload = true;
+      } else if (pollHandle) {
+        clearInterval(pollHandle);
+        pollHandle = null;
+        if (submissionsNeedReload) window.location.reload();
+      }
+    } catch {
+      // Ignore transient polling failures
+    }
+  }
+
+  if (startBtn) {
+    startBtn.addEventListener("click", async () => {
+      startBtn.disabled = true;
+      startBtn.textContent = "Starting...";
+      try {
+        const res = await fetch("/api/admin/submissions/migrate-legacy/start", { method: "POST" });
+        if (!res.ok) {
+          const err = await res.json();
+          alert(`Error: ${err.error}`);
+          startBtn.disabled = false;
+          startBtn.textContent = "Start migration";
+          return;
+        }
+        const data = await res.json();
+        renderJob(data.job);
+        if (!pollHandle) pollHandle = setInterval(pollMigrationStatus, 2000);
+      } catch (e: any) {
+        alert(`Error: ${e.message}`);
+        startBtn.disabled = false;
+        startBtn.textContent = "Start migration";
+      }
+    });
+  }
+
+  // On load, check if a migration is already running (e.g. started from another tab/admin) and resume polling.
+  (async () => {
+    try {
+      const res = await fetch("/api/admin/submissions/migrate-legacy/status");
+      if (!res.ok) return;
+      const data = await res.json();
+      const job: MigrationJob = data.job;
+      renderJob(job);
+      if (job.status === "RUNNING" && !pollHandle) {
+        pollHandle = setInterval(pollMigrationStatus, 2000);
+      }
+    } catch {
+      // Ignore
+    }
+  })();
 </script>

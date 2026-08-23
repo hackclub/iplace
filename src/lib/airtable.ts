@@ -1,3 +1,6 @@
+// DEPRECATED: this synced submissions to Airtable for the $5/hr hosting credit prize
+// fulfillment, which has been discontinued. Nothing calls this anymore -- kept around in
+// case it's ever needed for historical reference.
 import type * as db from "../prisma/generated/client";
 
 const AIRTABLE_API_KEY = import.meta.env.AIRTABLE_API_KEY;

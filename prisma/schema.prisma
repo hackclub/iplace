@@ -118,7 +118,8 @@ model Frame {
   /// The time when this frame was created.
   createdAt         DateTime      @default(now())
 
-  /// The Airtable ID associated with the frame (optional, set when synced).
+  /// DEPRECATED: the Airtable ID associated with the frame, from when prize
+  /// fulfillment synced to Airtable. Kept for historical records; no longer written to.
   airtableId        String?
 
   /// The submission this frame was created from.
@@ -157,25 +158,28 @@ model Submission {
   /// Comma-delimited list of Hackatime project names.
   hackatimeProjectNames String
 
-  /// Whether the user wants the $5/hr hosting credit prize.
+  /// DEPRECATED: whether the user wanted the $5/hr hosting credit prize. The prize
+  /// program has been discontinued; kept for historical records, no longer settable.
   wantsPrize            Boolean           @default(false)
 
   /// Review status of this submission.
   status                SubmissionStatus  @default(PENDING)
 
-  /// Feedback from the reviewer (used on rejection).
+  /// Feedback from the reviewer (used on rejection). Set by the AI reviewer or an admin.
   reviewerFeedback      String?
 
   /// When this submission was reviewed.
   reviewedAt            DateTime?
 
-  /// Slack ID of the reviewer.
+  /// Identifies who reviewed this submission: a Slack ID for a manual admin review,
+  /// or "ai:<model>" for an automated review.
   reviewedBy            String?
 
-  /// Whether this submission has been synced to Airtable.
+  /// DEPRECATED: whether this submission was synced to Airtable for prize fulfillment.
+  /// Kept for historical records; no longer written to.
   airtableSynced        Boolean           @default(false)
 
-  /// The Airtable record ID if synced.
+  /// DEPRECATED: the Airtable record ID if synced. Kept for historical records.
   airtableRecordId      String?
 
   /// The user who created this submission.
@@ -196,4 +200,40 @@ enum SubmissionStatus {
   PENDING
   APPROVED
   REJECTED
+}
+
+/// Tracks progress of the one-off job that migrates legacy submissions still
+/// stuck in manual PENDING review onto the automated AI review pipeline.
+/// Singleton row (id is always 1) so a DB-level compare-and-swap on `status`
+/// guarantees only one migration run is ever in flight.
+model SubmissionMigrationJob {
+  id                  Int       @id @default(1)
+
+  status              MigrationJobStatus @default(IDLE)
+
+  /// Number of legacy submissions captured when the job started.
+  totalCount          Int       @default(0)
+
+  /// Number of legacy submissions processed so far (approved + rejected + errored).
+  processedCount      Int       @default(0)
+
+  approvedCount       Int       @default(0)
+  rejectedCount       Int       @default(0)
+  errorCount          Int       @default(0)
+
+  /// The submission currently being reviewed, if any.
+  currentSubmissionId Int?
+
+  /// The last error message encountered, if any.
+  lastError           String?
+
+  startedAt           DateTime?
+  finishedAt          DateTime?
+}
+
+enum MigrationJobStatus {
+  IDLE
+  RUNNING
+  DONE
+  FAILED
 }
